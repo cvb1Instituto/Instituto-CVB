@@ -19,10 +19,10 @@
     <nav class="nav" id="nav">
       <a href="#sobre">Sobre</a>
       <a href="#projetos">Projetos</a>
+      <a href="#eventos">Eventos</a>
       <a href="#voluntariado">Voluntariado</a>
       <a href="#doar">Como Ajudar</a>
-      <a href="#galeria">Galeria</a>
-      <a href="#blog">Notícias</a>
+      <a href="#transparencia">Transparência</a>
       <a href="#parceiros">Parceiros</a>
       <a href="#contato" class="nav-cta">Contato</a>
     </nav>
@@ -115,6 +115,18 @@
     </div>
   </section>
 
+  <!-- EVENTOS -->
+  <section class="section" id="eventos">
+    <div class="container">
+      <div class="section-header">
+        <span class="eyebrow">Cultura &amp; Ação Social</span>
+        <h2>Eventos e Ações</h2>
+        <p>Cada evento é uma pasta: clique para ver as fotos, o relato e a prestação de contas.</p>
+      </div>
+      <div class="events-grid" id="eventsGrid"><!-- gerado via script.js --></div>
+    </div>
+  </section>
+
   <!-- VOLUNTARIADO -->
   <section class="section" id="voluntariado">
     <div class="container section-grid">
@@ -146,19 +158,46 @@
     </div>
   </section>
 
-  <!-- GALERIA -->
-  <section class="section" id="galeria">
+  <!-- TRANSPARÊNCIA -->
+  <section class="section" id="transparencia">
     <div class="container">
       <div class="section-header">
-        <span class="eyebrow">Nossos momentos</span>
-        <h2>Galeria</h2>
+        <span class="eyebrow">Prestação de Contas</span>
+        <h2>Portal da Transparência</h2>
+        <p>Por sermos uma ONG, prestamos contas de cada ação: o quanto foi arrecadado, o quanto foi gasto e onde cada valor foi aplicado.</p>
       </div>
-      <div class="gallery-grid">
-        <div class="gallery-item"><img src="galeria-1.jpg" alt="Distribuição de alimentos - Instituto CVB" loading="lazy"><span class="gallery-caption">Ação Social — Distribuição de Alimentos</span></div>
-        <div class="gallery-item"><img src="galeria-5.jpg" alt="Oficina de arte com crianças - Instituto CVB" loading="lazy"><span class="gallery-caption">Cultura — Oficina Comunitária</span></div>
-        <div class="gallery-item"><img src="galeria-4.jpg" alt="Doação de cesta básica - Instituto CVB" loading="lazy"><span class="gallery-caption">Ação Social — Apoio às Famílias</span></div>
-        <div class="gallery-item"><img src="galeria-2.jpg" alt="Equipe do Instituto CVB" loading="lazy"><span class="gallery-caption">Nossa Equipe</span></div>
-        <div class="gallery-item"><img src="galeria-3.jpg" alt="Voluntários unidos - Instituto CVB" loading="lazy"><span class="gallery-caption">Encontro de Voluntários</span></div>
+
+      <div class="transparency-summary">
+        <div class="modal-finance-item">
+          <div class="label">Total Arrecadado</div>
+          <div class="value value-in" id="summaryArrecadado">—</div>
+        </div>
+        <div class="modal-finance-item">
+          <div class="label">Total Gasto</div>
+          <div class="value value-out" id="summaryGasto">—</div>
+        </div>
+        <div class="modal-finance-item">
+          <div class="label">Saldo</div>
+          <div class="value value-balance" id="summarySaldo">—</div>
+        </div>
+      </div>
+
+      <p class="transparency-note">Os valores abaixo são exemplos ilustrativos — atualize com os números reais de cada evento.</p>
+
+      <div class="transparency-table-wrap">
+        <table class="transparency-table" id="transparencyTable">
+          <thead>
+            <tr>
+              <th>Evento</th>
+              <th>Categoria</th>
+              <th>Arrecadado</th>
+              <th>Gasto</th>
+              <th>Saldo</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody><!-- gerado via script.js --></tbody>
+        </table>
       </div>
     </div>
   </section>
@@ -233,6 +272,14 @@
   </section>
 
 </main>
+
+<!-- MODAL DE EVENTO -->
+<div class="modal-overlay" id="eventModal">
+  <div class="modal-box">
+    <button class="modal-close" id="eventModalClose" aria-label="Fechar">&times;</button>
+    <div id="eventModalContent"></div>
+  </div>
+</div>
 
 <footer class="footer">
   <div class="container footer-inner">
