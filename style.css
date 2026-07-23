@@ -560,7 +560,8 @@ p { margin: 0 0 16px; color: var(--gray); }
   .hero-inner { flex-direction: column; text-align: center; }
   .hero-text { max-width: 100%; }
   .hero-actions { justify-content: center; }
-  .hero-visual { display: none; }
+  .hero-visual { padding: 10px; }
+  .hero-logo { width: 260px; }
   .hero-text h1 { font-size: 30px; }
 }
 
