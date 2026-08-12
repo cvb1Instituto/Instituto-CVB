@@ -319,23 +319,27 @@ function setupModal() {
   });
 }
 
-function renderTransparency() {
+const TIPO_LABELS = { evento: 'Evento', campanha: 'Vaquinha', rifa: 'Rifa', outro: 'Outro' };
+const TIPO_ANCORA = { evento: '#eventos', campanha: '#vaquinhas', rifa: '#rifa' };
+
+function renderTransparency(rows) {
   const tbody = document.querySelector('#transparencyTable tbody');
   if (!tbody) return;
   let totalArrecadado = 0;
   let totalGasto = 0;
 
-  tbody.innerHTML = EVENTOS.map(ev => {
-    totalArrecadado += Number(ev.arrecadado);
-    totalGasto += Number(ev.gasto);
-    const saldo = Number(ev.arrecadado) - Number(ev.gasto);
+  tbody.innerHTML = (rows || []).map(pc => {
+    totalArrecadado += Number(pc.arrecadado);
+    totalGasto += Number(pc.gasto);
+    const saldo = Number(pc.arrecadado) - Number(pc.gasto);
+    const temLink = TIPO_ANCORA[pc.tipo];
     return `<tr>
-      <td>${escapeHtml(ev.titulo)}</td>
-      <td><span class="event-badge badge-${escapeHtml(ev.cor)}">${escapeHtml(ev.categoria)}</span></td>
-      <td>${formatBRL(ev.arrecadado)}</td>
-      <td>${formatBRL(ev.gasto)}</td>
+      <td>${escapeHtml(pc.projeto)}</td>
+      <td><span class="event-badge badge-blue">${escapeHtml(TIPO_LABELS[pc.tipo] || pc.tipo)}</span></td>
+      <td>${formatBRL(pc.arrecadado)}</td>
+      <td>${formatBRL(pc.gasto)}</td>
       <td>${formatBRL(saldo)}</td>
-      <td><span class="link-btn" data-id="${ev.id}">Ver detalhes</span></td>
+      <td>${temLink ? `<span class="link-btn" data-tipo="${pc.tipo}" data-item="${pc.item_id || ''}">Ver detalhes</span>` : ''}</td>
     </tr>`;
   }).join('');
 
@@ -345,7 +349,14 @@ function renderTransparency() {
   document.getElementById('summarySaldo').textContent = formatBRL(totalSaldo);
 
   tbody.querySelectorAll('.link-btn').forEach(btn => {
-    btn.addEventListener('click', () => openEventModal(btn.dataset.id));
+    btn.addEventListener('click', () => {
+      const tipo = btn.dataset.tipo;
+      if (tipo === 'evento' && btn.dataset.item && EVENTOS.find(e => e.id === btn.dataset.item)) {
+        openEventModal(btn.dataset.item);
+      } else {
+        document.querySelector(TIPO_ANCORA[tipo])?.scrollIntoView({ behavior: 'smooth' });
+      }
+    });
   });
 }
 
@@ -447,6 +458,10 @@ function renderRifaSection(rifa, bilhetes) {
   CURRENT_RIFA = rifa;
   RIFA_BILHETES = bilhetes;
 
+  const dataSorteioHtml = rifa.data_sorteio
+    ? `<p class="rifa-sorteio-data">🗓️ Sorteio em ${new Date(rifa.data_sorteio + 'T00:00:00').toLocaleDateString('pt-BR', { day: '2-digit', month: 'long', year: 'numeric' })}</p>`
+    : '';
+
   content.innerHTML = `
     <div class="rifa-header">
       ${rifa.premio_imagem_url ? `<img src="${escapeHtml(rifa.premio_imagem_url)}" alt="${escapeHtml(rifa.titulo)}" class="rifa-premio-img">` : ''}
@@ -454,20 +469,33 @@ function renderRifaSection(rifa, bilhetes) {
         <span class="eyebrow">Rifa Solidária</span>
         <h2>${escapeHtml(rifa.titulo)}</h2>
         <p>${escapeHtml(rifa.descricao)}</p>
-        <span class="rifa-preco">Cada número: ${formatBRL(rifa.preco_numero)}</span><br>
-        <button class="btn btn-outline" id="rifaLivreBtn">Quero ajudar com outro valor</button>
+        <span class="rifa-preco">Cada número: ${formatBRL(rifa.preco_numero)}</span>
+        ${dataSorteioHtml}
+        <div class="hero-actions" style="margin-top:20px;">
+          <button class="btn btn-primary" id="rifaAjudarBtn">Ajudar / Escolher número</button>
+          <button class="btn btn-outline" id="rifaLivreBtn">Ajudar com outro valor</button>
+        </div>
       </div>
     </div>
-    <div class="rifa-legend reveal">
-      <span><i style="background:var(--blue)"></i> Disponível</span>
-      <span><i style="background:var(--yellow-dark)"></i> Reservado</span>
-      <span><i style="background:var(--gray-light)"></i> Pago</span>
+    <div class="rifa-numeros-wrap" id="rifaNumerosWrap" style="display:none;">
+      <div class="rifa-legend reveal">
+        <span><i style="background:var(--blue)"></i> Disponível</span>
+        <span><i style="background:var(--yellow-dark)"></i> Reservado</span>
+        <span><i style="background:var(--gray-light)"></i> Pago</span>
+      </div>
+      <div class="rifa-numeros-grid reveal" id="rifaNumerosGrid"></div>
     </div>
-    <div class="rifa-numeros-grid reveal" id="rifaNumerosGrid"></div>
   `;
 
   renderRifaGrid();
   document.getElementById('rifaLivreBtn').addEventListener('click', openRifaLivreModal);
+  document.getElementById('rifaAjudarBtn').addEventListener('click', () => {
+    const wrap = document.getElementById('rifaNumerosWrap');
+    const showing = wrap.style.display !== 'none';
+    wrap.style.display = showing ? 'none' : '';
+    document.getElementById('rifaAjudarBtn').textContent = showing ? 'Ajudar / Escolher número' : 'Ocultar números';
+    if (!showing) wrap.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  });
 }
 
 function renderRifaGrid() {
@@ -615,6 +643,7 @@ async function loadContent() {
     { data: bannersRows },
     { data: campanhasRows },
     { data: rifasRows },
+    { data: prestacaoRows },
   ] = await Promise.all([
     supabaseClient.from('content_blocks').select('key, value'),
     supabaseClient.from('mvv').select('*').order('ordem'),
@@ -625,6 +654,7 @@ async function loadContent() {
     supabaseClient.from('banners').select('*').order('ordem'),
     supabaseClient.from('campanhas').select('*').order('ordem'),
     supabaseClient.from('rifas').select('*').eq('status', 'ativa').order('criado_em', { ascending: false }).limit(1),
+    supabaseClient.from('prestacao_contas').select('*').order('ordem'),
   ]);
 
   const blocks = {};
@@ -646,7 +676,7 @@ async function loadContent() {
 
   EVENTOS = eventosRows || [];
   renderEvents();
-  renderTransparency();
+  renderTransparency(prestacaoRows || []);
 
   const rifaAtiva = (rifasRows || [])[0] || null;
   if (rifaAtiva) {

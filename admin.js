@@ -99,7 +99,7 @@ function selectTab(key) {
 
   if (key === 'conteudo_institucional') return renderConteudoInstitucional(content);
   if (key === 'projetos') return renderCrud(content, PROJETOS_CONFIG);
-  if (key === 'eventos_transparencia') return renderCrud(content, EVENTOS_CONFIG);
+  if (key === 'eventos_transparencia') return renderEventosTransparencia(content);
   if (key === 'parceiros') return renderCrud(content, PARCEIROS_CONFIG);
   if (key === 'blog') return renderCrud(content, BLOG_CONFIG);
   if (key === 'banners') return renderCrud(content, BANNERS_CONFIG);
@@ -484,6 +484,225 @@ async function renderCrud(content, config) {
 }
 
 // =====================================================================
+// EVENTOS & TRANSPARÊNCIA — o CRUD de eventos de sempre, mais embaixo
+// a gestão da Prestação de Contas unificada (eventos + vaquinhas + rifa),
+// que é o que alimenta o Portal da Transparência no site público.
+// =====================================================================
+function renderEventosTransparencia(outer) {
+  outer.innerHTML = `<div id="eventosCrudWrap"></div><hr style="margin:36px 0; border:none; border-top:1px solid rgba(31,36,48,0.1);"><div id="prestacaoWrap"></div>`;
+  renderCrud(document.getElementById('eventosCrudWrap'), EVENTOS_CONFIG);
+  renderPrestacaoContas(document.getElementById('prestacaoWrap'));
+}
+
+const TIPO_LABEL_PC = { evento: 'Evento', campanha: 'Vaquinha', rifa: 'Rifa', outro: 'Outro' };
+
+async function renderPrestacaoContas(content) {
+  const [{ data: rows }, { data: eventosList }, { data: campanhasList }, { data: rifasList }] = await Promise.all([
+    supabaseClient.from('prestacao_contas').select('*').order('ordem'),
+    supabaseClient.from('eventos').select('id, titulo').order('titulo'),
+    supabaseClient.from('campanhas').select('id, titulo').order('titulo'),
+    supabaseClient.from('rifas').select('id, titulo').order('titulo'),
+  ]);
+
+  const listasPorTipo = { evento: eventosList || [], campanha: campanhasList || [], rifa: rifasList || [], outro: [] };
+
+  content.innerHTML = `
+    <h3>Prestação de Contas (Portal da Transparência)</h3>
+    <p class="admin-hint">Essa lista alimenta o Portal da Transparência no site — pode cadastrar aqui direto ou importar de uma planilha Excel.</p>
+    <div id="pcFeedback"></div>
+
+    <div style="display:flex; gap:10px; margin-bottom:24px;">
+      <label class="btn btn-outline" style="cursor:pointer;">
+        Importar planilha (.xlsx)
+        <input type="file" id="pcImportInput" accept=".xlsx,.xls" style="display:none;">
+      </label>
+      <button class="btn btn-outline" id="pcExportBtn">Exportar planilha (.xlsx)</button>
+    </div>
+    <p class="admin-hint">A planilha de importação deve ter as colunas: <strong>Tipo</strong> (Evento/Vaquinha/Rifa/Outro), <strong>Projeto</strong>, <strong>Arrecadado</strong>, <strong>Gasto</strong>, <strong>Relato</strong>. Cada importação adiciona novas linhas (não substitui as existentes). O vínculo com um evento/vaquinha/rifa específico (pro link "Ver detalhes" funcionar) só dá pra fazer editando aqui no painel, não pela planilha.</p>
+
+    <div id="pcList">
+      ${(rows || []).map(pc => `
+        <div class="admin-list-item">
+          <div>
+            <strong>${escapeHtml(pc.projeto)}</strong>
+            <div class="meta">${TIPO_LABEL_PC[pc.tipo] || pc.tipo} · arrecadado ${Number(pc.arrecadado || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} · gasto ${Number(pc.gasto || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</div>
+          </div>
+          <div class="admin-actions">
+            <button class="admin-btn-sm admin-btn-edit" data-pc-edit="${pc.id}">Editar</button>
+            <button class="admin-btn-sm admin-btn-danger" data-pc-delete="${pc.id}">Excluir</button>
+          </div>
+        </div>
+      `).join('') || '<p class="admin-hint">Nada cadastrado ainda.</p>'}
+    </div>
+
+    <h4 id="pcFormTitle">Adicionar novo</h4>
+    <div class="admin-field"><label>Projeto (nome que aparece na Transparência)</label><input id="pc_projeto"></div>
+    <div class="admin-field">
+      <label>Tipo / vincular a</label>
+      <select id="pc_tipo">
+        <option value="outro">Outro (sem vínculo)</option>
+        <option value="evento">Evento</option>
+        <option value="campanha">Vaquinha</option>
+        <option value="rifa">Rifa</option>
+      </select>
+    </div>
+    <div class="admin-field" id="pc_item_wrap" style="display:none;">
+      <label>Qual item</label>
+      <select id="pc_item_id"><option value="">— selecione —</option></select>
+    </div>
+    <div class="admin-field"><label>Arrecadado (R$)</label><input type="number" id="pc_arrecadado" step="0.01" value="0"></div>
+    <div class="admin-field"><label>Gasto (R$)</label><input type="number" id="pc_gasto" step="0.01" value="0"></div>
+    <div class="admin-field"><label>Relato / como o valor foi usado</label><textarea id="pc_relato" rows="3"></textarea></div>
+    <div class="admin-field"><label>Ordem</label><input type="number" id="pc_ordem" value="0"></div>
+    <button class="btn btn-primary" id="pcSaveBtn">Salvar</button>
+    <button class="btn btn-outline" id="pcCancelBtn" style="display:none; margin-left:10px;">Cancelar edição</button>
+  `;
+
+  let editingId = null;
+
+  function fillItemOptions(tipo, selectedId) {
+    const wrap = document.getElementById('pc_item_wrap');
+    const select = document.getElementById('pc_item_id');
+    if (tipo === 'outro') {
+      wrap.style.display = 'none';
+      select.innerHTML = '<option value="">— selecione —</option>';
+      return;
+    }
+    wrap.style.display = '';
+    const itens = listasPorTipo[tipo] || [];
+    select.innerHTML = '<option value="">— selecione —</option>' + itens.map(i => `<option value="${i.id}" ${i.id === selectedId ? 'selected' : ''}>${escapeHtml(i.titulo)}</option>`).join('');
+  }
+
+  function renderForm(pc) {
+    document.getElementById('pc_projeto').value = pc?.projeto || '';
+    document.getElementById('pc_tipo').value = pc?.tipo || 'outro';
+    document.getElementById('pc_arrecadado').value = pc?.arrecadado ?? 0;
+    document.getElementById('pc_gasto').value = pc?.gasto ?? 0;
+    document.getElementById('pc_relato').value = pc?.relato || '';
+    document.getElementById('pc_ordem').value = pc?.ordem ?? 0;
+    fillItemOptions(pc?.tipo || 'outro', pc?.item_id || '');
+    document.getElementById('pcFormTitle').textContent = pc ? `Editando: ${pc.projeto}` : 'Adicionar novo';
+    document.getElementById('pcCancelBtn').style.display = pc ? 'inline-flex' : 'none';
+  }
+  renderForm(null);
+
+  document.getElementById('pc_tipo').addEventListener('change', (e) => fillItemOptions(e.target.value, null));
+
+  document.getElementById('pcCancelBtn').addEventListener('click', () => {
+    editingId = null;
+    renderForm(null);
+  });
+
+  content.querySelectorAll('[data-pc-edit]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const pc = rows.find(r => r.id === btn.dataset.pcEdit);
+      editingId = pc.id;
+      renderForm(pc);
+      window.scrollTo({ top: document.getElementById('pcFormTitle').offsetTop - 20, behavior: 'smooth' });
+    });
+  });
+
+  content.querySelectorAll('[data-pc-delete]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      if (!confirm('Excluir esse registro da prestação de contas?')) return;
+      const { error } = await supabaseClient.from('prestacao_contas').delete().eq('id', btn.dataset.pcDelete);
+      if (error) {
+        document.getElementById('pcFeedback').innerHTML = `<div class="admin-error">${escapeHtml(error.message)}</div>`;
+      } else {
+        renderPrestacaoContas(content);
+      }
+    });
+  });
+
+  document.getElementById('pcSaveBtn').addEventListener('click', async () => {
+    const feedback = document.getElementById('pcFeedback');
+    const payload = {
+      projeto: document.getElementById('pc_projeto').value,
+      tipo: document.getElementById('pc_tipo').value,
+      item_id: document.getElementById('pc_item_id').value || null,
+      arrecadado: Number(document.getElementById('pc_arrecadado').value) || 0,
+      gasto: Number(document.getElementById('pc_gasto').value) || 0,
+      relato: document.getElementById('pc_relato').value,
+      ordem: Number(document.getElementById('pc_ordem').value) || 0,
+    };
+    if (!payload.projeto) {
+      feedback.innerHTML = `<div class="admin-error">Preencha o nome do projeto.</div>`;
+      return;
+    }
+    let error;
+    if (editingId) {
+      ({ error } = await supabaseClient.from('prestacao_contas').update(payload).eq('id', editingId));
+    } else {
+      ({ error } = await supabaseClient.from('prestacao_contas').insert(payload));
+    }
+    if (error) {
+      feedback.innerHTML = `<div class="admin-error">${escapeHtml(error.message)}</div>`;
+    } else {
+      editingId = null;
+      renderPrestacaoContas(content);
+    }
+  });
+
+  document.getElementById('pcImportInput').addEventListener('change', async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const feedback = document.getElementById('pcFeedback');
+    feedback.innerHTML = 'Importando...';
+    try {
+      const buf = await file.arrayBuffer();
+      const wb = XLSX.read(buf, { type: 'array' });
+      const sheet = wb.Sheets[wb.SheetNames[0]];
+      const raw = XLSX.utils.sheet_to_json(sheet, { defval: '' });
+
+      const normalizeTipo = (v) => {
+        const s = String(v).trim().toLowerCase();
+        if (s.startsWith('evento')) return 'evento';
+        if (s.startsWith('vaquinha') || s.startsWith('campanha')) return 'campanha';
+        if (s.startsWith('rifa')) return 'rifa';
+        return 'outro';
+      };
+
+      const payload = raw.map(r => ({
+        tipo: normalizeTipo(r['Tipo'] || r['tipo'] || 'outro'),
+        projeto: String(r['Projeto'] || r['projeto'] || '').trim(),
+        arrecadado: Number(r['Arrecadado'] || r['arrecadado'] || 0) || 0,
+        gasto: Number(r['Gasto'] || r['gasto'] || 0) || 0,
+        relato: String(r['Relato'] || r['relato'] || ''),
+      })).filter(r => r.projeto);
+
+      if (payload.length === 0) {
+        feedback.innerHTML = `<div class="admin-error">Nenhuma linha válida encontrada (confira se a coluna "Projeto" está preenchida).</div>`;
+        return;
+      }
+
+      const { error } = await supabaseClient.from('prestacao_contas').insert(payload);
+      if (error) throw error;
+      feedback.innerHTML = `<div class="admin-success">${payload.length} linha(s) importada(s)!</div>`;
+      renderPrestacaoContas(content);
+    } catch (err) {
+      feedback.innerHTML = `<div class="admin-error">Erro ao importar: ${escapeHtml(err.message)}</div>`;
+    }
+    e.target.value = '';
+  });
+
+  document.getElementById('pcExportBtn').addEventListener('click', async () => {
+    const { data: exportRows } = await supabaseClient.from('prestacao_contas').select('*').order('ordem');
+    const sheetData = (exportRows || []).map(r => ({
+      Tipo: TIPO_LABEL_PC[r.tipo] || r.tipo,
+      Projeto: r.projeto,
+      Arrecadado: Number(r.arrecadado || 0),
+      Gasto: Number(r.gasto || 0),
+      Saldo: Number(r.arrecadado || 0) - Number(r.gasto || 0),
+      Relato: r.relato || '',
+    }));
+    const ws = XLSX.utils.json_to_sheet(sheetData);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Prestacao de Contas');
+    XLSX.writeFile(wb, 'prestacao-contas-instituto-cvb.xlsx');
+  });
+}
+
+// =====================================================================
 // RIFA — criar rifas, ver a grade de números, confirmar pagamentos
 // (fluxo manual: a pessoa reserva no site, paga por Pix e manda
 // comprovante por WhatsApp; aqui é onde se confirma o pagamento).
@@ -515,6 +734,7 @@ async function renderRifa(content) {
     <div class="admin-field"><label>Imagem do prêmio</label><input type="text" id="newrifa_premio_imagem_url" placeholder="URL ou nome de arquivo"><input type="file" id="newrifa_premio_imagem_url_file" accept="image/*" style="margin-top:6px;"></div>
     <div class="admin-field"><label>Preço por número (R$)</label><input type="number" id="newrifa_preco" value="20" step="0.01"></div>
     <div class="admin-field"><label>Total de números</label><input type="number" id="newrifa_total" value="1000" step="1"></div>
+    <div class="admin-field"><label>Data do sorteio</label><input type="date" id="newrifa_data_sorteio"></div>
     <button class="btn btn-primary" id="createRifaBtn">Criar rifa</button>
   `;
 
@@ -537,6 +757,7 @@ async function renderRifa(content) {
         premio_imagem_url: imagemUrl || null,
         preco_numero: Number(document.getElementById('newrifa_preco').value) || 0,
         total_numeros: total,
+        data_sorteio: document.getElementById('newrifa_data_sorteio').value || null,
         status: 'ativa',
       }).select().single();
 

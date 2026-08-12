@@ -435,6 +435,7 @@ img { max-width: 100%; display: block; }
 .rifa-premio-img { border-radius: var(--radius-lg); box-shadow: var(--shadow-lg); width: 100%; aspect-ratio: 4/3; object-fit: cover; }
 .rifa-info .eyebrow { color: var(--yellow-dark); }
 .rifa-preco { display: inline-block; background: var(--dark); color: var(--white); font-weight: 700; padding: 8px 18px; border-radius: 999px; font-size: 14px; margin-bottom: 16px; }
+.rifa-sorteio-data { display: inline-block; margin: 0 0 0 10px; font-size: 14px; color: var(--gray); font-weight: 600; }
 .rifa-legend { display: flex; gap: 18px; flex-wrap: wrap; margin: 20px 0; font-size: 13px; color: var(--gray); }
 .rifa-legend span { display: inline-flex; align-items: center; gap: 6px; }
 .rifa-legend i { width: 12px; height: 12px; border-radius: 3px; display: inline-block; }
