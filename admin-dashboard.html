@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Painel Admin — Instituto CVB</title>
+<meta name="robots" content="noindex">
+<link rel="stylesheet" href="style.css">
+</head>
+<body class="admin-body">
+
+<div class="admin-shell">
+  <div class="admin-topbar">
+    <a href="index.html" class="logo">
+      <img src="logo.png" alt="Instituto CVB" class="logo-mark">
+      <span class="logo-text">Instituto <strong>CVB</strong></span>
+    </a>
+    <div style="display:flex; align-items:center; gap:14px;">
+      <span id="userLabel" style="font-size:13.5px; color:var(--gray);"></span>
+      <button class="admin-btn-sm admin-btn-danger" id="logoutBtn">Sair</button>
+    </div>
+  </div>
+
+  <div class="admin-tabs" id="adminTabs"></div>
+  <div class="admin-card" id="adminContent">Carregando...</div>
+</div>
+
+<script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+<script src="config.js"></script>
+<script src="admin.js"></script>
+</body>
+</html>
