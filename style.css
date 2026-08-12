@@ -144,6 +144,9 @@ img { max-width: 100%; display: block; }
   font-weight: 600;
 }
 .nav-cta:hover { background: var(--green); }
+.nav-admin { font-size: 12.5px !important; opacity: 0.55; }
+.nav-admin:hover { opacity: 1; }
+.nav-admin::after { display: none !important; }
 
 .menu-toggle {
   display: none;
