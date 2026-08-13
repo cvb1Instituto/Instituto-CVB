@@ -1197,6 +1197,8 @@ async function renderUsuarios(content) {
     permsByProfile[p.profile_id].push(p.section);
   });
 
+  let editingUserId = null;
+
   content.innerHTML = `
     <h3>Usuários</h3>
     <div id="feedback"></div>
@@ -1208,16 +1210,18 @@ async function renderUsuarios(content) {
             <div class="meta">${p.role === 'master' ? 'Admin master (acesso total)' : (permsByProfile[p.id] || []).map(s => SECTION_LABELS[s]).join(', ') || 'sem permissões'}</div>
           </div>
           <div class="admin-actions">
-            ${p.id === CURRENT_PROFILE.id ? '<span class="meta">(você)</span>' : `<button class="admin-btn-sm admin-btn-danger" data-remove="${p.id}">Remover</button>`}
+            ${p.id === CURRENT_PROFILE.id ? '<span class="meta">(você)</span>' : ''}
+            <button class="admin-btn-sm admin-btn-edit" data-edit-user="${p.id}">Editar</button>
+            ${p.id === CURRENT_PROFILE.id ? '' : `<button class="admin-btn-sm admin-btn-danger" data-remove="${p.id}">Remover</button>`}
           </div>
         </div>
       `).join('')}
     </div>
 
-    <h3>Cadastrar novo usuário</h3>
+    <h3 id="userFormTitle">Cadastrar novo usuário</h3>
     <div class="admin-field"><label>Nome</label><input id="newuser_nome"></div>
-    <div class="admin-field"><label>E-mail</label><input id="newuser_email" type="email"></div>
-    <div class="admin-field"><label>Senha (mínimo 8 caracteres)</label><input id="newuser_password" type="text"></div>
+    <div class="admin-field" id="newuser_email_wrap"><label>E-mail</label><input id="newuser_email" type="email"></div>
+    <div class="admin-field"><label id="newuser_password_label">Senha (mínimo 8 caracteres)</label><input id="newuser_password" type="text"></div>
     <div class="admin-field">
       <label>Tipo de acesso</label>
       <select id="newuser_role">
@@ -1235,10 +1239,47 @@ async function renderUsuarios(content) {
       `).join('')}
     </div>
     <button class="btn btn-primary" id="createUserBtn">Cadastrar usuário</button>
+    <button class="btn btn-outline" id="cancelEditUserBtn" style="display:none; margin-left:10px;">Cancelar edição</button>
   `;
+
+  function resetUserForm() {
+    editingUserId = null;
+    document.getElementById('userFormTitle').textContent = 'Cadastrar novo usuário';
+    document.getElementById('newuser_nome').value = '';
+    document.getElementById('newuser_email').value = '';
+    document.getElementById('newuser_email_wrap').style.display = '';
+    document.getElementById('newuser_password').value = '';
+    document.getElementById('newuser_password_label').textContent = 'Senha (mínimo 8 caracteres)';
+    document.getElementById('newuser_role').value = 'editor';
+    document.getElementById('newuser_sections_wrap').style.display = 'block';
+    Object.keys(SECTION_LABELS).forEach(key => { document.getElementById(`newuser_section_${key}`).checked = false; });
+    document.getElementById('createUserBtn').textContent = 'Cadastrar usuário';
+    document.getElementById('cancelEditUserBtn').style.display = 'none';
+  }
 
   document.getElementById('newuser_role').addEventListener('change', (e) => {
     document.getElementById('newuser_sections_wrap').style.display = e.target.value === 'master' ? 'none' : 'block';
+  });
+
+  document.getElementById('cancelEditUserBtn').addEventListener('click', resetUserForm);
+
+  content.querySelectorAll('[data-edit-user]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const p = profiles.find(x => x.id === btn.dataset.editUser);
+      editingUserId = p.id;
+      document.getElementById('userFormTitle').textContent = `Editando: ${p.nome}`;
+      document.getElementById('newuser_nome').value = p.nome;
+      document.getElementById('newuser_email_wrap').style.display = 'none';
+      document.getElementById('newuser_password').value = '';
+      document.getElementById('newuser_password_label').textContent = 'Nova senha (deixe em branco pra manter a atual)';
+      document.getElementById('newuser_role').value = p.role;
+      document.getElementById('newuser_sections_wrap').style.display = p.role === 'master' ? 'none' : 'block';
+      const userSections = permsByProfile[p.id] || [];
+      Object.keys(SECTION_LABELS).forEach(key => { document.getElementById(`newuser_section_${key}`).checked = userSections.includes(key); });
+      document.getElementById('createUserBtn').textContent = 'Salvar alterações';
+      document.getElementById('cancelEditUserBtn').style.display = 'inline-flex';
+      window.scrollTo({ top: document.getElementById('userFormTitle').offsetTop - 20, behavior: 'smooth' });
+    });
   });
 
   content.querySelectorAll('[data-remove]').forEach(btn => {
@@ -1262,13 +1303,42 @@ async function renderUsuarios(content) {
 
   document.getElementById('createUserBtn').addEventListener('click', async () => {
     const feedback = document.getElementById('feedback');
-    feedback.innerHTML = 'Cadastrando...';
     const nome = document.getElementById('newuser_nome').value.trim();
-    const email = document.getElementById('newuser_email').value.trim();
     const password = document.getElementById('newuser_password').value;
     const role = document.getElementById('newuser_role').value;
     const sections = Object.keys(SECTION_LABELS).filter(key => document.getElementById(`newuser_section_${key}`).checked);
 
+    if (editingUserId) {
+      feedback.innerHTML = 'Salvando...';
+      const { error: profileError } = await supabaseClient.from('profiles').update({ nome, role }).eq('id', editingUserId);
+      const { error: delPermsError } = await supabaseClient.from('section_permissions').delete().eq('profile_id', editingUserId);
+      let permsError = null;
+      if (role === 'editor' && sections.length > 0) {
+        ({ error: permsError } = await supabaseClient.from('section_permissions').insert(sections.map(s => ({ profile_id: editingUserId, section: s }))));
+      }
+      let passwordError = null;
+      if (password) {
+        const { data: { session } } = await supabaseClient.auth.getSession();
+        const res = await fetch(`${EDGE_FUNCTIONS_URL}/admin-update-user`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+          body: JSON.stringify({ user_id: editingUserId, password }),
+        });
+        const result = await res.json();
+        if (!res.ok) passwordError = result.error;
+      }
+      const firstError = profileError || delPermsError || permsError || passwordError;
+      if (firstError) {
+        feedback.innerHTML = `<div class="admin-error">${escapeHtml(firstError.message || firstError)}</div>`;
+      } else {
+        feedback.innerHTML = `<div class="admin-success">Usuário atualizado!</div>`;
+        renderUsuarios(content);
+      }
+      return;
+    }
+
+    feedback.innerHTML = 'Cadastrando...';
+    const email = document.getElementById('newuser_email').value.trim();
     const { data: { session } } = await supabaseClient.auth.getSession();
     const res = await fetch(`${EDGE_FUNCTIONS_URL}/admin-create-user`, {
       method: 'POST',
