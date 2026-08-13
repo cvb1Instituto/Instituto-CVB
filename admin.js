@@ -194,7 +194,9 @@ async function renderConteudoInstitucional(content) {
     ${mvv.map(m => `
       <div class="admin-field">
         <label>${escapeHtml(m.titulo)} — imagem</label>
+        <p class="admin-hint">Tamanho recomendado: 1200x1200px (quadrada)</p>
         <input id="mvv_img_${m.id}" value="${escapeHtml(m.imagem_url)}" placeholder="ex: missao.png ou URL">
+        <input type="file" id="mvv_img_${m.id}_file" accept="image/*" style="margin-top:6px;">
       </div>
       <div class="admin-field">
         <label>${escapeHtml(m.titulo)} — texto (usado só se a imagem acima estiver vazia)</label>
@@ -243,12 +245,16 @@ async function renderConteudoInstitucional(content) {
 
     const { error: blocksError } = await supabaseClient.from('content_blocks').upsert(updates);
 
-    const mvvUpdates = mvv.map(m => ({
-      id: m.id,
-      titulo: m.titulo,
-      ordem: m.ordem,
-      imagem_url: val(`mvv_img_${m.id}`) || null,
-      texto: val(`mvv_texto_${m.id}`),
+    const mvvUpdates = await Promise.all(mvv.map(async (m) => {
+      const fileInput = document.getElementById(`mvv_img_${m.id}_file`);
+      const imagemUrl = fileInput?.files[0] ? await uploadImage(fileInput.files[0]) : (val(`mvv_img_${m.id}`) || null);
+      return {
+        id: m.id,
+        titulo: m.titulo,
+        ordem: m.ordem,
+        imagem_url: imagemUrl,
+        texto: val(`mvv_texto_${m.id}`),
+      };
     }));
     const { error: mvvError } = await supabaseClient.from('mvv').upsert(mvvUpdates);
 
@@ -285,8 +291,8 @@ const EVENTOS_CONFIG = {
     { name: 'categoria', label: 'Categoria', type: 'text', required: true },
     { name: 'cor', label: 'Cor do selo', type: 'select', options: ['green', 'blue', 'teal', 'yellow'] },
     { name: 'data', label: 'Data (texto, ex: Junho de 2026)', type: 'text' },
-    { name: 'capa_url', label: 'Foto de capa', type: 'image' },
-    { name: 'fotos', label: 'Fotos (galeria do evento)', type: 'images' },
+    { name: 'capa_url', label: 'Foto de capa', type: 'image', hint: '1200x900px (proporção 4:3)' },
+    { name: 'fotos', label: 'Fotos (galeria do evento)', type: 'images', hint: '1200x900px (proporção 4:3), pode subir várias' },
     { name: 'descricao', label: 'Relato do evento', type: 'textarea' },
     { name: 'arrecadado', label: 'Arrecadado (R$)', type: 'number', default: 0 },
     { name: 'gasto', label: 'Gasto (R$)', type: 'number', default: 0 },
@@ -302,7 +308,7 @@ const PARCEIROS_CONFIG = {
   title: 'Parceiros',
   fields: [
     { name: 'nome', label: 'Nome', type: 'text', required: true },
-    { name: 'logo_url', label: 'Logo', type: 'image' },
+    { name: 'logo_url', label: 'Logo', type: 'image', hint: 'PNG com fundo transparente, altura de ~300px' },
     { name: 'link', label: 'Link do site do parceiro', type: 'text' },
     { name: 'ordem', label: 'Ordem', type: 'number', default: 0 },
   ],
@@ -330,7 +336,7 @@ const BANNERS_CONFIG = {
   fields: [
     { name: 'titulo', label: 'Título', type: 'text', required: true },
     { name: 'texto', label: 'Texto', type: 'textarea' },
-    { name: 'imagem_url', label: 'Imagem de fundo', type: 'image' },
+    { name: 'imagem_url', label: 'Imagem', type: 'image', hint: '1000x700px (paisagem)' },
     { name: 'botao_texto', label: 'Texto do botão', type: 'text' },
     { name: 'botao_link', label: 'Link do botão (URL ou #ancora, ex: #rifa)', type: 'text' },
     { name: 'ordem', label: 'Ordem', type: 'number', default: 0 },
@@ -348,7 +354,7 @@ const CAMPANHAS_CONFIG = {
     { name: 'descricao', label: 'Descrição', type: 'textarea', required: true },
     { name: 'meta', label: 'Meta (R$, deixe em branco se não tiver meta definida)', type: 'number' },
     { name: 'arrecadado', label: 'Arrecadado até agora (R$) — atualize conforme as doações chegam', type: 'number', default: 0 },
-    { name: 'fotos', label: 'Fotos', type: 'images' },
+    { name: 'fotos', label: 'Fotos', type: 'images', hint: '1200x750px (proporção 16:10), pode subir várias (a primeira é a capa)' },
     { name: 'video_url', label: 'Vídeo (URL do YouTube/Instagram, opcional)', type: 'text' },
     { name: 'whatsapp_texto', label: 'Mensagem pré-pronta do botão "Quero ajudar" (WhatsApp)', type: 'textarea' },
     { name: 'ordem', label: 'Ordem', type: 'number', default: 0 },
@@ -381,6 +387,7 @@ function fieldHtml(field, value, prefix) {
     return `
       <div class="admin-field">
         <label>${escapeHtml(field.label)}</label>
+        ${field.hint ? `<p class="admin-hint">Tamanho recomendado: ${escapeHtml(field.hint)}</p>` : ''}
         <input type="text" id="${id}" value="${escapeHtml(v)}" placeholder="URL ou nome de arquivo já existente no site">
         <input type="file" id="${id}_file" accept="image/*" style="margin-top:6px;">
       </div>
@@ -391,6 +398,7 @@ function fieldHtml(field, value, prefix) {
     return `
       <div class="admin-field">
         <label>${escapeHtml(field.label)} (uma URL/arquivo por linha)</label>
+        ${field.hint ? `<p class="admin-hint">Tamanho recomendado: ${escapeHtml(field.hint)}</p>` : ''}
         <textarea id="${id}" rows="3">${escapeHtml(list)}</textarea>
         <input type="file" id="${id}_file" accept="image/*" multiple style="margin-top:6px;">
       </div>
@@ -783,7 +791,12 @@ async function renderRifa(content) {
     <h3>Criar nova rifa</h3>
     <div class="admin-field"><label>Título</label><input id="newrifa_titulo" placeholder="ex: Rifa Solidária — Bike Elétrica"></div>
     <div class="admin-field"><label>Descrição</label><textarea id="newrifa_descricao" rows="3"></textarea></div>
-    <div class="admin-field"><label>Imagem do prêmio</label><input type="text" id="newrifa_premio_imagem_url" placeholder="URL ou nome de arquivo"><input type="file" id="newrifa_premio_imagem_url_file" accept="image/*" style="margin-top:6px;"></div>
+    <div class="admin-field">
+      <label>Imagem do prêmio</label>
+      <p class="admin-hint">Tamanho recomendado: 1200x900px (proporção 4:3)</p>
+      <input type="text" id="newrifa_premio_imagem_url" placeholder="URL ou nome de arquivo">
+      <input type="file" id="newrifa_premio_imagem_url_file" accept="image/*" style="margin-top:6px;">
+    </div>
     <div class="admin-field"><label>Preço por número (R$)</label><input type="number" id="newrifa_preco" value="20" step="0.01"></div>
     <div class="admin-field"><label>Total de números</label><input type="number" id="newrifa_total" value="1000" step="1"></div>
     <div class="admin-field"><label>Data do sorteio</label><input type="date" id="newrifa_data_sorteio"></div>
