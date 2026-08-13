@@ -527,7 +527,8 @@ function renderBannerCarousel(banners) {
 
   wrap.innerHTML = `
     ${ativos.map((b, i) => `
-      <div class="banner-slide ${i === 0 ? 'active' : ''}" data-i="${i}" style="background-image:url('${escapeHtml(b.imagem_url)}')">
+      <div class="banner-slide ${i === 0 ? 'active' : ''}" data-i="${i}">
+        <div class="banner-slide-image" style="background-image:url('${escapeHtml(b.imagem_url)}')"></div>
         <div class="banner-slide-content">
           <h3>${escapeHtml(b.titulo)}</h3>
           ${b.texto ? `<p>${escapeHtml(b.texto)}</p>` : ''}

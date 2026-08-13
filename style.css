@@ -410,30 +410,33 @@ img { max-width: 100%; display: block; }
 }
 
 /* ---- Carrossel de banners/campanhas ---- */
-.banner-carousel-section { padding: 40px 0; background: var(--white); }
-.banner-carousel { position: relative; border-radius: var(--radius-lg); overflow: hidden; box-shadow: var(--shadow-lg); aspect-ratio: 21/8; min-height: 220px; }
-.banner-slide {
-  position: absolute; inset: 0;
-  display: flex; align-items: center;
-  background-size: cover; background-position: center;
-  opacity: 0; transition: opacity .5s ease;
-  pointer-events: none;
+.banner-carousel-section { padding: 32px 0 8px; background: var(--white); }
+.banner-carousel {
+  position: relative;
+  border-radius: var(--radius);
+  overflow: hidden;
+  background: var(--light-bg);
+  box-shadow: var(--shadow-sm);
+  border: 1px solid rgba(31,36,48,0.06);
 }
-.banner-slide.active { opacity: 1; pointer-events: auto; }
-.banner-slide::before { content: ''; position: absolute; inset: 0; background: linear-gradient(90deg, rgba(15,20,30,0.75) 0%, rgba(15,20,30,0.35) 55%, rgba(15,20,30,0.05) 100%); }
-.banner-slide-content { position: relative; z-index: 1; padding: 0 56px; max-width: 560px; color: var(--white); }
-.banner-slide-content h3 { color: var(--white); font-size: clamp(20px, 2.6vw, 30px); margin-bottom: 10px; }
-.banner-slide-content p { color: rgba(255,255,255,0.85); margin-bottom: 20px; font-size: 15px; }
-.banner-nav { position: absolute; top: 50%; transform: translateY(-50%); width: 40px; height: 40px; border-radius: 50%; background: rgba(255,255,255,0.85); border: none; cursor: pointer; font-size: 18px; z-index: 2; display: flex; align-items: center; justify-content: center; }
-.banner-nav:hover { background: var(--white); }
-.banner-nav-prev { left: 16px; }
-.banner-nav-next { right: 16px; }
-.banner-dots { position: absolute; bottom: 16px; left: 0; right: 0; display: flex; justify-content: center; gap: 8px; z-index: 2; }
-.banner-dot { width: 9px; height: 9px; border-radius: 50%; background: rgba(255,255,255,0.5); border: none; cursor: pointer; padding: 0; }
-.banner-dot.active { background: var(--white); width: 22px; border-radius: 5px; transition: width .2s ease; }
+.banner-slide { display: none; grid-template-columns: 0.9fr 1.1fr; min-height: 200px; }
+.banner-slide.active { display: grid; }
+.banner-slide-image { background-size: cover; background-position: center; min-height: 180px; }
+.banner-slide-content { padding: 28px 40px; display: flex; flex-direction: column; justify-content: center; }
+.banner-slide-content h3 { color: var(--dark); font-size: clamp(17px, 1.8vw, 21px); margin-bottom: 8px; }
+.banner-slide-content p { color: var(--gray); margin-bottom: 16px; font-size: 14px; }
+.banner-slide-content .btn { align-self: flex-start; padding: 10px 20px; font-size: 13.5px; }
+.banner-nav { position: absolute; top: 50%; transform: translateY(-50%); width: 34px; height: 34px; border-radius: 50%; background: var(--white); box-shadow: var(--shadow-sm); border: none; cursor: pointer; font-size: 16px; z-index: 2; display: flex; align-items: center; justify-content: center; color: var(--dark); }
+.banner-nav:hover { box-shadow: var(--shadow-md); }
+.banner-nav-prev { left: 12px; }
+.banner-nav-next { right: 12px; }
+.banner-dots { position: absolute; bottom: 10px; right: 16px; display: flex; gap: 6px; z-index: 2; }
+.banner-dot { width: 7px; height: 7px; border-radius: 50%; background: rgba(31,36,48,0.18); border: none; cursor: pointer; padding: 0; }
+.banner-dot.active { background: var(--green); width: 18px; border-radius: 4px; transition: width .2s ease; }
 @media (max-width: 720px) {
-  .banner-carousel { aspect-ratio: 4/5; }
-  .banner-slide-content { padding: 0 28px; max-width: 100%; }
+  .banner-slide { grid-template-columns: 1fr; }
+  .banner-slide-image { min-height: 160px; }
+  .banner-slide-content { padding: 20px 24px 28px; }
 }
 
 /* ---- Vaquinhas (campanhas) ---- */
