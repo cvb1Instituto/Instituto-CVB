@@ -11,9 +11,8 @@
 
 <div class="admin-shell">
   <div class="admin-topbar">
-    <a href="index.html" class="logo">
-      <img src="logo.png" alt="Instituto CVB" class="logo-mark">
-      <span class="logo-text">Instituto <strong>CVB</strong></span>
+    <a href="index.html" class="admin-login-logo" style="margin-bottom:0;">
+      <img src="logo-header.png" alt="Instituto CVB" style="height:40px;">
     </a>
     <div style="display:flex; align-items:center; gap:14px;">
       <span id="userLabel" style="font-size:13.5px; color:var(--gray);"></span>
@@ -21,8 +20,10 @@
     </div>
   </div>
 
-  <div class="admin-tabs" id="adminTabs"></div>
-  <div class="admin-card" id="adminContent">Carregando...</div>
+  <div class="admin-layout">
+    <nav class="admin-tabs" id="adminTabs"></nav>
+    <div class="admin-card" id="adminContent">Carregando...</div>
+  </div>
 </div>
 
 <script src="https://unpkg.com/@supabase/supabase-js@2"></script>

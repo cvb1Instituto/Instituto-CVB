@@ -33,6 +33,98 @@ function setupMenu() {
   });
 }
 
+// ---- Seletor de idioma (tradução automática, sem digitar nada extra no admin) ----
+// Traduz o texto já renderizado na página chamando o mesmo serviço que o
+// Google Tradutor usa, e troca os nós de texto na hora. Resultado fica em
+// cache (memória + localStorage) pra não traduzir de novo a cada troca.
+const TRANSLATE_CACHE = {};
+let PENDING_LANG = null;
+
+function loadTranslateCache() {
+  try {
+    const raw = localStorage.getItem('cvb_translate_cache');
+    if (raw) Object.assign(TRANSLATE_CACHE, JSON.parse(raw));
+  } catch (e) { /* localStorage indisponível, segue sem cache persistente */ }
+}
+
+function saveTranslateCache() {
+  try { localStorage.setItem('cvb_translate_cache', JSON.stringify(TRANSLATE_CACHE)); } catch (e) {}
+}
+
+async function translateText(text, lang) {
+  const key = `${lang}:${text}`;
+  if (TRANSLATE_CACHE[key]) return TRANSLATE_CACHE[key];
+  try {
+    const res = await fetch(`https://translate.googleapis.com/translate_a/single?client=gtx&sl=pt&tl=${lang}&dt=t&q=${encodeURIComponent(text)}`);
+    const data = await res.json();
+    const translated = data[0].map(part => part[0]).join('');
+    TRANSLATE_CACHE[key] = translated;
+    return translated;
+  } catch (e) {
+    return text;
+  }
+}
+
+function getTranslatableTextNodes() {
+  const skipTags = new Set(['SCRIPT', 'STYLE', 'NOSCRIPT']);
+  const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, {
+    acceptNode(node) {
+      if (!node.nodeValue.trim()) return NodeFilter.FILTER_REJECT;
+      const parent = node.parentElement;
+      if (!parent || skipTags.has(parent.tagName)) return NodeFilter.FILTER_REJECT;
+      if (parent.closest('#langSwitcher')) return NodeFilter.FILTER_REJECT;
+      return NodeFilter.FILTER_ACCEPT;
+    },
+  });
+  const nodes = [];
+  let n;
+  while ((n = walker.nextNode())) nodes.push(n);
+  return nodes;
+}
+
+async function applyTranslation(lang) {
+  const nodes = getTranslatableTextNodes();
+  nodes.forEach(node => {
+    if (node.__originalText === undefined) node.__originalText = node.nodeValue;
+  });
+
+  if (lang === 'pt') {
+    nodes.forEach(node => { node.nodeValue = node.__originalText; });
+    return;
+  }
+
+  await Promise.all(nodes.map(async (node) => {
+    const original = node.__originalText;
+    const trimmed = original.trim();
+    if (!trimmed) return;
+    const translated = await translateText(trimmed, lang);
+    node.nodeValue = original.replace(trimmed, translated);
+  }));
+  saveTranslateCache();
+}
+
+function setupLangSwitcher() {
+  const switcher = document.getElementById('langSwitcher');
+  if (!switcher) return;
+  loadTranslateCache();
+
+  let savedLang = null;
+  try { savedLang = localStorage.getItem('cvb_lang'); } catch (e) {}
+  if (savedLang && savedLang !== 'pt') {
+    switcher.querySelectorAll('.lang-btn').forEach(b => b.classList.toggle('active', b.dataset.lang === savedLang));
+    PENDING_LANG = savedLang;
+  }
+
+  switcher.querySelectorAll('.lang-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const lang = btn.dataset.lang;
+      switcher.querySelectorAll('.lang-btn').forEach(b => b.classList.toggle('active', b === btn));
+      try { localStorage.setItem('cvb_lang', lang); } catch (e) {}
+      await applyTranslation(lang);
+    });
+  });
+}
+
 // ---- Header com sombra ao rolar + link ativo ----
 function setupHeaderScroll() {
   const header = document.getElementById('header');
@@ -85,6 +177,63 @@ function setupContactForm() {
     const subject = encodeURIComponent('Contato pelo site - Instituto CVB');
     const body = encodeURIComponent(`Nome: ${nome}\nE-mail: ${email}\n\n${mensagem}`);
     window.location.href = `mailto:cvbinstituto@gmail.com?subject=${subject}&body=${body}`;
+  });
+}
+
+// ---- Fale com a gente (CRM) ----
+function setupCrmForm() {
+  const form = document.getElementById('crmForm');
+  if (!form) return;
+  const tipoSelect = document.getElementById('crmTipo');
+  const curriculoWrap = document.getElementById('crmCurriculoWrap');
+
+  tipoSelect.addEventListener('change', () => {
+    curriculoWrap.style.display = tipoSelect.value === 'trabalhe_conosco' ? '' : 'none';
+  });
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const feedback = document.getElementById('crmFeedback');
+    const submitBtn = form.querySelector('button[type="submit"]');
+    const tipo = tipoSelect.value;
+    const nome = form.nome.value.trim();
+    const telefone = form.telefone.value.trim();
+    const mensagem = form.mensagem.value.trim();
+    const fileInput = document.getElementById('crmCurriculo');
+
+    if (!tipo || !nome || !telefone) {
+      feedback.innerHTML = `<div class="admin-error">Preencha o motivo, nome e WhatsApp.</div>`;
+      return;
+    }
+
+    submitBtn.disabled = true;
+    submitBtn.textContent = 'Enviando...';
+    feedback.innerHTML = '';
+
+    try {
+      let curriculoUrl = null;
+      if (tipo === 'trabalhe_conosco' && fileInput.files[0]) {
+        const file = fileInput.files[0];
+        const path = `uploads/${Date.now()}-${file.name.replace(/[^a-zA-Z0-9.\-_]/g, '_')}`;
+        const { error: uploadError } = await supabaseClient.storage.from('curriculos').upload(path, file);
+        if (uploadError) throw uploadError;
+        curriculoUrl = path;
+      }
+
+      const { error: insertError } = await supabaseClient.from('contatos_crm').insert({
+        tipo, nome, telefone, mensagem, curriculo_url: curriculoUrl,
+      });
+      if (insertError) throw insertError;
+
+      form.reset();
+      curriculoWrap.style.display = 'none';
+      feedback.innerHTML = `<div class="admin-success">Recebemos seu contato! Em breve alguém do instituto vai te responder.</div>`;
+    } catch (err) {
+      feedback.innerHTML = `<div class="admin-error">${escapeHtml(err.message)}</div>`;
+    } finally {
+      submitBtn.disabled = false;
+      submitBtn.textContent = 'Enviar';
+    }
   });
 }
 
@@ -193,9 +342,12 @@ function renderDoar(d) {
 function renderParceiros(rows) {
   const el = document.getElementById('partnersGrid');
   if (!el) return;
-  const real = Array.isArray(rows) ? rows.map(p => `
-    <div class="partner-box">${p.logo_url ? `<img src="${escapeHtml(p.logo_url)}" alt="${escapeHtml(p.nome)}" class="partner-logo">` : escapeHtml(p.nome)}</div>
-  `).join('') : '';
+  const real = Array.isArray(rows) ? rows.map(p => {
+    const inner = p.logo_url ? `<img src="${escapeHtml(p.logo_url)}" alt="${escapeHtml(p.nome)}" class="partner-logo">` : escapeHtml(p.nome);
+    return p.link
+      ? `<a href="${escapeHtml(p.link)}" target="_blank" rel="noopener" class="partner-box">${inner}</a>`
+      : `<div class="partner-box">${inner}</div>`;
+  }).join('') : '';
   el.innerHTML = real + `<div class="partner-box partner-cta">Sua empresa aqui</div>`;
 }
 
@@ -693,6 +845,10 @@ document.getElementById('year').textContent = new Date().getFullYear();
 setupMenu();
 setupHeaderScroll();
 setupContactForm();
+setupCrmForm();
+setupLangSwitcher();
 setupModal();
 setupRifaModal();
-loadContent();
+loadContent().then(() => {
+  if (PENDING_LANG) applyTranslation(PENDING_LANG);
+});

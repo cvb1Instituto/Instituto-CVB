@@ -13,6 +13,7 @@ const SECTION_LABELS = {
   banners: 'Banners',
   campanhas: 'Vaquinhas',
   rifa: 'Rifa',
+  crm: 'CRM',
 };
 
 const EDGE_FUNCTIONS_URL = `${SUPABASE_URL}/functions/v1`;
@@ -20,6 +21,7 @@ const EDGE_FUNCTIONS_URL = `${SUPABASE_URL}/functions/v1`;
 let CURRENT_PROFILE = null;
 let CURRENT_SECTIONS = [];
 let ACTIVE_TAB = null;
+let CRM_UNREAD_COUNT = 0;
 
 function escapeHtml(str) {
   const div = document.createElement('div');
@@ -72,6 +74,11 @@ async function init() {
   }
 
   renderTabs();
+  setupCrmRealtime();
+}
+
+function hasCrmAccess() {
+  return CURRENT_PROFILE?.role === 'master' || CURRENT_SECTIONS.includes('crm');
 }
 
 function renderTabs() {
@@ -88,7 +95,37 @@ function renderTabs() {
   tabsEl.querySelectorAll('.admin-tab').forEach(btn => {
     btn.addEventListener('click', () => selectTab(btn.dataset.tab));
   });
+  updateCrmBadgeUI();
   selectTab(tabs[0].key);
+}
+
+function updateCrmBadgeUI() {
+  const btn = document.querySelector('.admin-tab[data-tab="crm"]');
+  if (!btn) return;
+  const existing = btn.querySelector('.admin-tab-badge');
+  if (CRM_UNREAD_COUNT > 0) {
+    if (existing) existing.textContent = CRM_UNREAD_COUNT;
+    else btn.insertAdjacentHTML('beforeend', `<span class="admin-tab-badge">${CRM_UNREAD_COUNT}</span>`);
+  } else if (existing) {
+    existing.remove();
+  }
+}
+
+async function setupCrmRealtime() {
+  if (!hasCrmAccess()) return;
+
+  const { count } = await supabaseClient.from('contatos_crm').select('id', { count: 'exact', head: true }).eq('visualizado', false);
+  CRM_UNREAD_COUNT = count || 0;
+  updateCrmBadgeUI();
+
+  supabaseClient
+    .channel('contatos_crm-changes')
+    .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'contatos_crm' }, () => {
+      CRM_UNREAD_COUNT += 1;
+      updateCrmBadgeUI();
+      if (ACTIVE_TAB === 'crm') renderCRM(document.getElementById('adminContent'));
+    })
+    .subscribe();
 }
 
 function selectTab(key) {
@@ -105,6 +142,7 @@ function selectTab(key) {
   if (key === 'banners') return renderCrud(content, BANNERS_CONFIG);
   if (key === 'campanhas') return renderCrud(content, CAMPANHAS_CONFIG);
   if (key === 'rifa') return renderRifa(content);
+  if (key === 'crm') return renderCRM(content);
   if (key === 'usuarios') return renderUsuarios(content);
 }
 
@@ -265,10 +303,11 @@ const PARCEIROS_CONFIG = {
   fields: [
     { name: 'nome', label: 'Nome', type: 'text', required: true },
     { name: 'logo_url', label: 'Logo', type: 'image' },
+    { name: 'link', label: 'Link do site do parceiro', type: 'text' },
     { name: 'ordem', label: 'Ordem', type: 'number', default: 0 },
   ],
   listLabel: (row) => row.nome,
-  listMeta: () => '',
+  listMeta: (row) => row.link || '',
 };
 
 const BLOG_CONFIG = {
@@ -517,6 +556,7 @@ async function renderPrestacaoContas(content) {
         <input type="file" id="pcImportInput" accept=".xlsx,.xls" style="display:none;">
       </label>
       <button class="btn btn-outline" id="pcExportBtn">Exportar planilha (.xlsx)</button>
+      <button class="btn btn-outline" id="pcTemplateBtn">Baixar modelo em branco</button>
     </div>
     <p class="admin-hint">A planilha de importação deve ter as colunas: <strong>Tipo</strong> (Evento/Vaquinha/Rifa/Outro), <strong>Projeto</strong>, <strong>Arrecadado</strong>, <strong>Gasto</strong>, <strong>Relato</strong>. Cada importação adiciona novas linhas (não substitui as existentes). O vínculo com um evento/vaquinha/rifa específico (pro link "Ver detalhes" funcionar) só dá pra fazer editando aqui no painel, não pela planilha.</p>
 
@@ -695,10 +735,22 @@ async function renderPrestacaoContas(content) {
       Saldo: Number(r.arrecadado || 0) - Number(r.gasto || 0),
       Relato: r.relato || '',
     }));
-    const ws = XLSX.utils.json_to_sheet(sheetData);
+    const ws = sheetData.length
+      ? XLSX.utils.json_to_sheet(sheetData)
+      : XLSX.utils.aoa_to_sheet([['Tipo', 'Projeto', 'Arrecadado', 'Gasto', 'Saldo', 'Relato']]);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Prestacao de Contas');
     XLSX.writeFile(wb, 'prestacao-contas-instituto-cvb.xlsx');
+  });
+
+  document.getElementById('pcTemplateBtn').addEventListener('click', () => {
+    const ws = XLSX.utils.aoa_to_sheet([
+      ['Tipo', 'Projeto', 'Arrecadado', 'Gasto', 'Relato'],
+      ['Evento', 'ex: Distribuição de Alimentos - Junho/2026', 5000, 4750, 'ex: compra de cestas básicas para 100 famílias'],
+    ]);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Modelo');
+    XLSX.writeFile(wb, 'modelo-prestacao-contas-instituto-cvb.xlsx');
   });
 }
 
@@ -847,6 +899,276 @@ async function renderRifaDetail(rifa) {
       if (!error) renderRifaDetail(rifa);
     });
   });
+}
+
+// =====================================================================
+// CRM — kanban de contatos (voluntário, trabalhe conosco, parceiro,
+// ação, ajuda). Cartões chegam em tempo real (setupCrmRealtime) e são
+// organizados em colunas que o próprio usuário define.
+// =====================================================================
+const CRM_TIPO_LABELS = {
+  voluntario: 'Voluntário',
+  trabalhe_conosco: 'Trabalhe Conosco',
+  parceiro: 'Parceiro',
+  acao: 'Quero fazer uma ação',
+  ajuda: 'Preciso de ajuda',
+};
+
+let CRM_COLUNAS_CACHE = [];
+let CRM_CONTATOS_CACHE = [];
+let CRM_FILTRO_TIPO = '';
+let CRM_FILTRO_BUSCA = '';
+
+async function renderCRM(content) {
+  const [{ data: colunas }, { data: contatos }] = await Promise.all([
+    supabaseClient.from('kanban_colunas').select('*').order('ordem'),
+    supabaseClient.from('contatos_crm').select('*').order('created_at', { ascending: false }),
+  ]);
+  CRM_COLUNAS_CACHE = colunas || [];
+  CRM_CONTATOS_CACHE = contatos || [];
+
+  const naoVistos = CRM_CONTATOS_CACHE.filter(c => !c.visualizado).map(c => c.id);
+  if (naoVistos.length > 0) {
+    await supabaseClient.from('contatos_crm').update({ visualizado: true }).in('id', naoVistos);
+    CRM_CONTATOS_CACHE.forEach(c => { c.visualizado = true; });
+    CRM_UNREAD_COUNT = 0;
+    updateCrmBadgeUI();
+  }
+
+  content.innerHTML = `
+    <div class="crm-topbar">
+      <h3 style="margin:0;">CRM de Contatos</h3>
+      <button class="admin-btn-sm admin-btn-edit" id="crmColunasToggle">Gerenciar colunas</button>
+    </div>
+    <div id="crmColunasPanel" style="display:none;"></div>
+
+    <div class="crm-filters">
+      <select id="crmFilterTipo">
+        <option value="">Todos os tipos</option>
+        ${Object.entries(CRM_TIPO_LABELS).map(([k, l]) => `<option value="${k}" ${CRM_FILTRO_TIPO === k ? 'selected' : ''}>${l}</option>`).join('')}
+      </select>
+      <input type="text" id="crmFilterBusca" placeholder="Buscar por nome ou telefone..." value="${escapeHtml(CRM_FILTRO_BUSCA)}">
+    </div>
+
+    <div class="crm-board" id="crmBoard"></div>
+  `;
+
+  renderCrmColunasPanel();
+  renderCrmBoard();
+
+  document.getElementById('crmColunasToggle').addEventListener('click', () => {
+    const panel = document.getElementById('crmColunasPanel');
+    panel.style.display = panel.style.display === 'none' ? '' : 'none';
+  });
+  document.getElementById('crmFilterTipo').addEventListener('change', (e) => {
+    CRM_FILTRO_TIPO = e.target.value;
+    renderCrmBoard();
+  });
+  document.getElementById('crmFilterBusca').addEventListener('input', (e) => {
+    CRM_FILTRO_BUSCA = e.target.value;
+    renderCrmBoard();
+  });
+}
+
+function crmFiltered() {
+  const busca = CRM_FILTRO_BUSCA.trim().toLowerCase();
+  return CRM_CONTATOS_CACHE.filter(c => {
+    if (CRM_FILTRO_TIPO && c.tipo !== CRM_FILTRO_TIPO) return false;
+    if (busca && !(c.nome.toLowerCase().includes(busca) || (c.telefone || '').includes(busca))) return false;
+    return true;
+  });
+}
+
+function renderCrmBoard() {
+  const board = document.getElementById('crmBoard');
+  if (!board) return;
+  const contatos = crmFiltered();
+  const colunasOrdenadas = [...CRM_COLUNAS_CACHE].sort((a, b) => a.ordem - b.ordem);
+  const primeiraColunaId = colunasOrdenadas[0]?.id;
+
+  board.innerHTML = colunasOrdenadas.map(col => {
+    const cardsDaColuna = contatos.filter(c => c.coluna_id === col.id || (!c.coluna_id && col.id === primeiraColunaId));
+    return `
+      <div class="crm-column" data-coluna="${col.id}">
+        <div class="crm-column-header">${escapeHtml(col.nome)} <span class="crm-column-count">${cardsDaColuna.length}</span></div>
+        <div class="crm-column-body" data-coluna-body="${col.id}">
+          ${cardsDaColuna.map(c => `
+            <div class="crm-card" draggable="true" data-id="${c.id}">
+              <span class="crm-card-tipo">${escapeHtml(CRM_TIPO_LABELS[c.tipo] || c.tipo)}</span>
+              <strong>${escapeHtml(c.nome)}</strong>
+              <div class="crm-card-meta">${escapeHtml(c.telefone)}</div>
+              <div class="crm-card-date">${new Date(c.created_at).toLocaleString('pt-BR')}</div>
+            </div>
+          `).join('') || '<p class="admin-hint">Nada aqui.</p>'}
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  board.querySelectorAll('.crm-card').forEach(card => {
+    card.addEventListener('dragstart', (e) => {
+      e.dataTransfer.setData('text/plain', card.dataset.id);
+      card.classList.add('dragging');
+    });
+    card.addEventListener('dragend', () => card.classList.remove('dragging'));
+    card.addEventListener('click', () => openCrmCardDetail(card.dataset.id));
+  });
+
+  board.querySelectorAll('.crm-column-body').forEach(colBody => {
+    colBody.addEventListener('dragover', (e) => { e.preventDefault(); colBody.classList.add('drag-over'); });
+    colBody.addEventListener('dragleave', () => colBody.classList.remove('drag-over'));
+    colBody.addEventListener('drop', async (e) => {
+      e.preventDefault();
+      colBody.classList.remove('drag-over');
+      const id = e.dataTransfer.getData('text/plain');
+      const colunaId = colBody.dataset.colunaBody;
+      await moveCrmCard(id, colunaId);
+    });
+  });
+}
+
+async function moveCrmCard(id, colunaId) {
+  const cardsNaColuna = CRM_CONTATOS_CACHE.filter(c => c.coluna_id === colunaId);
+  const novaOrdem = cardsNaColuna.length ? Math.max(...cardsNaColuna.map(c => c.ordem_na_coluna || 0)) + 1 : 0;
+  const { error } = await supabaseClient.from('contatos_crm').update({ coluna_id: colunaId, ordem_na_coluna: novaOrdem }).eq('id', id);
+  if (!error) {
+    const local = CRM_CONTATOS_CACHE.find(c => c.id === id);
+    if (local) { local.coluna_id = colunaId; local.ordem_na_coluna = novaOrdem; }
+    renderCrmBoard();
+  }
+}
+
+async function openCrmCardDetail(id) {
+  const c = CRM_CONTATOS_CACHE.find(x => x.id === id);
+  if (!c) return;
+
+  let curriculoLinkHtml = '';
+  if (c.curriculo_url) {
+    const { data: signed } = await supabaseClient.storage.from('curriculos').createSignedUrl(c.curriculo_url, 300);
+    curriculoLinkHtml = signed?.signedUrl
+      ? `<p><a href="${signed.signedUrl}" target="_blank" rel="noopener" class="btn btn-outline">Baixar currículo</a></p>`
+      : '';
+  }
+
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay open';
+  overlay.innerHTML = `
+    <div class="modal-box">
+      <button class="modal-close" id="crmDetailClose" aria-label="Fechar">&times;</button>
+      <div style="padding:28px;">
+        <span class="event-badge badge-blue">${escapeHtml(CRM_TIPO_LABELS[c.tipo] || c.tipo)}</span>
+        <h2>${escapeHtml(c.nome)}</h2>
+        <p class="modal-date">${new Date(c.created_at).toLocaleString('pt-BR')}</p>
+        <p><strong>WhatsApp:</strong> <a href="https://wa.me/55${escapeHtml((c.telefone || '').replace(/\D/g, ''))}" target="_blank" rel="noopener">${escapeHtml(c.telefone)}</a></p>
+        ${c.mensagem ? `<p><strong>Mensagem:</strong> ${escapeHtml(c.mensagem)}</p>` : ''}
+        ${curriculoLinkHtml}
+        <button class="btn btn-outline" id="crmDetailDelete" style="margin-top:12px;">Excluir contato</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  document.body.style.overflow = 'hidden';
+
+  function close() {
+    overlay.remove();
+    document.body.style.overflow = '';
+  }
+  overlay.querySelector('#crmDetailClose').addEventListener('click', close);
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+  overlay.querySelector('#crmDetailDelete').addEventListener('click', async () => {
+    if (!confirm('Excluir esse contato definitivamente?')) return;
+    const { error } = await supabaseClient.from('contatos_crm').delete().eq('id', id);
+    if (!error) {
+      CRM_CONTATOS_CACHE = CRM_CONTATOS_CACHE.filter(x => x.id !== id);
+      close();
+      renderCrmBoard();
+    }
+  });
+}
+
+function renderCrmColunasPanel() {
+  const panel = document.getElementById('crmColunasPanel');
+  if (!panel) return;
+  const colunas = [...CRM_COLUNAS_CACHE].sort((a, b) => a.ordem - b.ordem);
+
+  panel.innerHTML = `
+    <div class="admin-card" style="margin-bottom:20px;">
+      <h4 style="margin-top:0;">Colunas do quadro</h4>
+      ${colunas.map((col, i) => `
+        <div class="admin-list-item">
+          <input type="text" value="${escapeHtml(col.nome)}" data-col-rename="${col.id}" style="border:none; background:transparent; font-weight:600; font-size:14px;">
+          <div class="admin-actions">
+            <button class="admin-btn-sm admin-btn-edit" data-col-up="${col.id}" ${i === 0 ? 'disabled' : ''}>↑</button>
+            <button class="admin-btn-sm admin-btn-edit" data-col-down="${col.id}" ${i === colunas.length - 1 ? 'disabled' : ''}>↓</button>
+            <button class="admin-btn-sm admin-btn-danger" data-col-delete="${col.id}">Excluir</button>
+          </div>
+        </div>
+      `).join('')}
+      <div class="admin-field" style="display:flex; gap:10px; margin-top:16px;">
+        <input type="text" id="crmNovaColuna" placeholder="Nome da nova coluna" style="flex:1;">
+        <button class="btn btn-primary" id="crmAddColuna">Adicionar</button>
+      </div>
+    </div>
+  `;
+
+  panel.querySelectorAll('[data-col-rename]').forEach(input => {
+    input.addEventListener('change', async () => {
+      await supabaseClient.from('kanban_colunas').update({ nome: input.value }).eq('id', input.dataset.colRename);
+      const col = CRM_COLUNAS_CACHE.find(c => c.id === input.dataset.colRename);
+      if (col) col.nome = input.value;
+      renderCrmBoard();
+    });
+  });
+
+  panel.querySelectorAll('[data-col-up]').forEach(btn => {
+    btn.addEventListener('click', () => swapColunaOrdem(btn.dataset.colUp, -1));
+  });
+  panel.querySelectorAll('[data-col-down]').forEach(btn => {
+    btn.addEventListener('click', () => swapColunaOrdem(btn.dataset.colDown, 1));
+  });
+  panel.querySelectorAll('[data-col-delete]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      if (!confirm('Excluir essa coluna? Os cartões dela ficam sem coluna.')) return;
+      await supabaseClient.from('kanban_colunas').delete().eq('id', btn.dataset.colDelete);
+      CRM_COLUNAS_CACHE = CRM_COLUNAS_CACHE.filter(c => c.id !== btn.dataset.colDelete);
+      renderCrmColunasPanel();
+      renderCrmBoard();
+    });
+  });
+
+  document.getElementById('crmAddColuna').addEventListener('click', async () => {
+    const input = document.getElementById('crmNovaColuna');
+    const nome = input.value.trim();
+    if (!nome) return;
+    const maxOrdem = CRM_COLUNAS_CACHE.length ? Math.max(...CRM_COLUNAS_CACHE.map(c => c.ordem)) : 0;
+    const { data, error } = await supabaseClient.from('kanban_colunas').insert({ nome, ordem: maxOrdem + 1 }).select().single();
+    if (!error && data) {
+      CRM_COLUNAS_CACHE.push(data);
+      renderCrmColunasPanel();
+      renderCrmBoard();
+    }
+  });
+}
+
+async function swapColunaOrdem(id, direcao) {
+  const ordenadas = [...CRM_COLUNAS_CACHE].sort((a, b) => a.ordem - b.ordem);
+  const idx = ordenadas.findIndex(c => c.id === id);
+  const alvoIdx = idx + direcao;
+  if (alvoIdx < 0 || alvoIdx >= ordenadas.length) return;
+
+  const a = ordenadas[idx];
+  const b = ordenadas[alvoIdx];
+  const ordemA = a.ordem;
+  const ordemB = b.ordem;
+
+  await Promise.all([
+    supabaseClient.from('kanban_colunas').update({ ordem: ordemB }).eq('id', a.id),
+    supabaseClient.from('kanban_colunas').update({ ordem: ordemA }).eq('id', b.id),
+  ]);
+  a.ordem = ordemB;
+  b.ordem = ordemA;
+  renderCrmColunasPanel();
+  renderCrmBoard();
 }
 
 // =====================================================================

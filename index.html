@@ -12,8 +12,7 @@
 <header class="header" id="header">
   <div class="container header-inner">
     <a href="#inicio" class="logo">
-      <img src="logo.png" alt="Instituto CVB" class="logo-mark">
-      <span class="logo-text">Instituto <strong>CVB</strong></span>
+      <img src="logo-header.png" alt="Instituto CVB" class="logo-header-img">
     </a>
 
     <nav class="nav" id="nav">
@@ -26,9 +25,15 @@
       <a href="#doar">Como Ajudar</a>
       <a href="#transparencia">Transparência</a>
       <a href="#parceiros">Parceiros</a>
-      <a href="admin-login.html" class="nav-admin">Admin</a>
       <a href="#contato" class="nav-cta">Contato</a>
+      <a href="admin-login.html" class="nav-admin">Admin</a>
     </nav>
+
+    <div class="lang-switcher" id="langSwitcher">
+      <button class="lang-btn active" data-lang="pt">PT</button>
+      <button class="lang-btn" data-lang="en">EN</button>
+      <button class="lang-btn" data-lang="es">ES</button>
+    </div>
 
     <button class="menu-toggle" id="menuToggle" aria-label="Abrir menu">
       <span></span><span></span><span></span>
@@ -203,6 +208,40 @@
           </div>
           <textarea name="mensagem" rows="4" placeholder="Sua mensagem" required></textarea>
           <button type="submit" class="btn btn-primary">Enviar mensagem</button>
+        </form>
+      </div>
+    </div>
+
+    <div class="container">
+      <div class="crm-form-wrap reveal">
+        <div class="section-header" style="margin-bottom:28px;">
+          <span class="eyebrow">Participe</span>
+          <h2>Fale com a gente</h2>
+          <p>Quer ser voluntário, trabalhar conosco, ser parceiro, propor uma ação ou precisa de ajuda? Escolha o motivo e deixe seus dados que a gente retorna.</p>
+        </div>
+        <form class="crm-form" id="crmForm">
+          <div class="admin-field">
+            <label>Motivo do contato</label>
+            <select name="tipo" id="crmTipo" required>
+              <option value="">Selecione...</option>
+              <option value="voluntario">Quero ser voluntário</option>
+              <option value="trabalhe_conosco">Trabalhe conosco</option>
+              <option value="parceiro">Quero ser parceiro</option>
+              <option value="acao">Quero fazer uma ação com o instituto</option>
+              <option value="ajuda">Preciso de ajuda</option>
+            </select>
+          </div>
+          <div class="form-row">
+            <input type="text" name="nome" placeholder="Seu nome" required>
+            <input type="tel" name="telefone" placeholder="Seu WhatsApp" required>
+          </div>
+          <textarea name="mensagem" rows="3" placeholder="Conte um pouco mais (opcional)"></textarea>
+          <div class="admin-field" id="crmCurriculoWrap" style="display:none;">
+            <label>Currículo (PDF ou Word)</label>
+            <input type="file" id="crmCurriculo" accept=".pdf,.doc,.docx">
+          </div>
+          <div id="crmFeedback"></div>
+          <button type="submit" class="btn btn-primary">Enviar</button>
         </form>
       </div>
     </div>
