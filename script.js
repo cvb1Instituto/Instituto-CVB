@@ -246,17 +246,25 @@ function renderHero(hero) {
     <h1>${escapeHtml(hero.titulo)}</h1>
     <p>${escapeHtml(hero.texto)}</p>
     <div class="hero-actions">
-      <a href="#doar" class="btn btn-primary">${escapeHtml(hero.cta_primario || 'Quero Ajudar')}</a>
-      <a href="#sobre" class="btn btn-outline">${escapeHtml(hero.cta_secundario || 'Conheça o Instituto')}</a>
+      <a href="#doar" class="btn btn-primary">💚 ${escapeHtml(hero.cta_primario || 'Quero Ajudar')}</a>
+      <a href="#sobre" class="btn btn-outline">🤝 ${escapeHtml(hero.cta_secundario || 'Conheça o Instituto')}</a>
     </div>
   `;
 }
 
+const STAT_ICONS = ['👥', '📋', '📍', '❤️'];
+
 function renderStats(stats) {
   const el = document.getElementById('statsGrid');
   if (!el || !Array.isArray(stats)) return;
-  el.innerHTML = stats.map(s => `
-    <div class="stat"><span class="stat-number">${escapeHtml(s.numero)}</span><span class="stat-label">${escapeHtml(s.label)}</span></div>
+  el.innerHTML = stats.map((s, i) => `
+    <div class="stat">
+      <span class="stat-icon">${STAT_ICONS[i] || '⭐'}</span>
+      <div class="stat-text">
+        <span class="stat-number">${escapeHtml(s.numero)}</span>
+        <span class="stat-label">${escapeHtml(s.label)}</span>
+      </div>
+    </div>
   `).join('');
 }
 
@@ -349,6 +357,13 @@ function renderParceiros(rows) {
       : `<div class="partner-box">${inner}</div>`;
   }).join('') : '';
   el.innerHTML = real + `<div class="partner-box partner-cta">Sua empresa aqui</div>`;
+
+  document.getElementById('partnersPrev')?.addEventListener('click', () => {
+    el.scrollBy({ left: -240, behavior: 'smooth' });
+  });
+  document.getElementById('partnersNext')?.addEventListener('click', () => {
+    el.scrollBy({ left: 240, behavior: 'smooth' });
+  });
 }
 
 function renderBlog(rows) {
@@ -530,6 +545,7 @@ function renderBannerCarousel(banners) {
       <div class="banner-slide ${i === 0 ? 'active' : ''}" data-i="${i}">
         <div class="banner-slide-image" style="background-image:url('${escapeHtml(b.imagem_url)}')"></div>
         <div class="banner-slide-content">
+          <span class="banner-badge">Participe e faça a diferença</span>
           <h3>${escapeHtml(b.titulo)}</h3>
           ${b.texto ? `<p>${escapeHtml(b.texto)}</p>` : ''}
           ${b.botao_texto && b.botao_link ? `<a href="${escapeHtml(b.botao_link)}" class="btn btn-primary">${escapeHtml(b.botao_texto)}</a>` : ''}
