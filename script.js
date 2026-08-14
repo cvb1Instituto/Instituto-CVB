@@ -328,7 +328,7 @@ function renderVoluntariado(v) {
   `;
 }
 
-function renderDoar(d) {
+function renderDoar(d, hasRifa) {
   const el = document.getElementById('doarContent');
   if (!el || !d) return;
   const msg = encodeURIComponent(d.whatsapp_texto || 'Olá! Quero fazer uma doação para o Instituto CVB.');
@@ -342,6 +342,7 @@ function renderDoar(d) {
       <div class="hero-actions">
         <a href="https://wa.me/5527981067522?text=${msg}" target="_blank" rel="noopener" class="btn btn-primary">Doar via WhatsApp</a>
         <a href="mailto:cvbinstituto@gmail.com" class="btn btn-outline">Doar por e-mail</a>
+        ${hasRifa ? '<a href="#rifa" class="btn btn-outline">🎟️ Participar da Rifa</a>' : ''}
       </div>
     </div>
   `;
@@ -836,7 +837,7 @@ async function loadContent() {
   renderMvv(mvvRows || []);
   renderProjetos(projetosRows || []);
   renderVoluntariado(blocks.voluntariado);
-  renderDoar(blocks.doar);
+  renderDoar(blocks.doar, (rifasRows || []).length > 0);
   renderParceiros(parceirosRows || []);
   renderBlog(blogRows || []);
   renderContato(blocks.contato);
