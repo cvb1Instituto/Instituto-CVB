@@ -185,7 +185,7 @@ img { max-width: 100%; display: block; }
 @media (prefers-reduced-motion: reduce) { .hero-logo { animation: none; } }
 
 /* ---- Stats ---- */
-.stats { background: linear-gradient(135deg, #16244a, #1a2f5c); padding: 36px 0; }
+.stats { background: linear-gradient(135deg, var(--dark), var(--blue-dark)); padding: 36px 0; }
 .stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 24px; }
 .stat { display: flex; align-items: center; justify-content: center; gap: 14px; }
 .stat-icon { font-size: 26px; flex-shrink: 0; filter: drop-shadow(0 2px 3px rgba(0,0,0,0.25)); }

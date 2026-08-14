@@ -340,9 +340,8 @@ function renderDoar(d, hasRifa) {
     <div class="section-content reveal">
       <p>${escapeHtml(d.texto)}</p>
       <div class="hero-actions">
-        <a href="https://wa.me/5527981067522?text=${msg}" target="_blank" rel="noopener" class="btn btn-primary">Doar via WhatsApp</a>
-        <a href="mailto:cvbinstituto@gmail.com" class="btn btn-outline">Doar por e-mail</a>
-        ${hasRifa ? '<a href="#rifa" class="btn btn-outline">🎟️ Participar da Rifa</a>' : ''}
+        ${hasRifa ? '<a href="#rifa" class="btn btn-primary">🎟️ Participar da Rifa</a>' : `<a href="https://wa.me/5527981067522?text=${msg}" target="_blank" rel="noopener" class="btn btn-primary">Doar via WhatsApp</a>`}
+        ${hasRifa ? `<a href="https://wa.me/5527981067522?text=${msg}" target="_blank" rel="noopener" class="btn btn-outline">Doar via WhatsApp</a>` : ''}
       </div>
     </div>
   `;
