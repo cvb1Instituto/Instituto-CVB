@@ -309,7 +309,11 @@ const PARCEIROS_CONFIG = {
   fields: [
     { name: 'nome', label: 'Nome', type: 'text', required: true },
     { name: 'logo_url', label: 'Logo', type: 'image', hint: 'PNG com fundo transparente, altura de ~300px' },
-    { name: 'link', label: 'Link do site do parceiro', type: 'text' },
+    { name: 'descricao', label: 'Descrição da empresa', type: 'textarea' },
+    { name: 'contato', label: 'Contato (telefone, e-mail ou WhatsApp)', type: 'text' },
+    { name: 'link', label: 'Site do parceiro', type: 'text' },
+    { name: 'fotos', label: 'Fotos', type: 'images', hint: '1200x900px (proporção 4:3), pode subir várias' },
+    { name: 'video_url', label: 'Vídeo (opcional)', type: 'text', hint: 'Link do YouTube ou URL direta de um vídeo (.mp4)' },
     { name: 'ordem', label: 'Ordem', type: 'number', default: 0 },
   ],
   listLabel: (row) => row.nome,
@@ -336,7 +340,7 @@ const BANNERS_CONFIG = {
   fields: [
     { name: 'titulo', label: 'Título', type: 'text', required: true },
     { name: 'texto', label: 'Texto', type: 'textarea' },
-    { name: 'imagem_url', label: 'Imagem', type: 'image', hint: '1000x700px (paisagem)' },
+    { name: 'imagem_url', label: 'Imagem', type: 'image', hint: '1200x630px (bem panorâmica). Deixe o texto/logo centralizado, com margem de uns 15-20% nas bordas — a imagem preenche o quadro cortando as sobras.' },
     { name: 'botao_texto', label: 'Texto do botão', type: 'text' },
     { name: 'botao_link', label: 'Link do botão (URL ou #ancora, ex: #rifa)', type: 'text' },
     { name: 'ordem', label: 'Ordem', type: 'number', default: 0 },
@@ -782,6 +786,8 @@ async function renderRifa(content) {
           </div>
           <div class="admin-actions">
             <button class="admin-btn-sm admin-btn-edit" data-manage="${r.id}">Gerenciar</button>
+            <button class="admin-btn-sm admin-btn-edit" data-editar="${r.id}">Editar</button>
+            <button class="admin-btn-sm admin-btn-danger" data-excluir="${r.id}">Excluir</button>
           </div>
         </div>
       `).join('') || '<p class="admin-hint">Nenhuma rifa cadastrada ainda.</p>'}
@@ -789,13 +795,19 @@ async function renderRifa(content) {
     <div id="rifaDetail"></div>
 
     <h3>Criar nova rifa</h3>
+    <p class="admin-hint">Você pode ter mais de uma rifa "ativa" ao mesmo tempo — todas aparecem no site.</p>
     <div class="admin-field"><label>Título</label><input id="newrifa_titulo" placeholder="ex: Rifa Solidária — Bike Elétrica"></div>
     <div class="admin-field"><label>Descrição</label><textarea id="newrifa_descricao" rows="3"></textarea></div>
     <div class="admin-field">
-      <label>Imagem do prêmio</label>
+      <label>Foto do prêmio</label>
       <p class="admin-hint">Tamanho recomendado: 1200x900px (proporção 4:3)</p>
       <input type="text" id="newrifa_premio_imagem_url" placeholder="URL ou nome de arquivo">
       <input type="file" id="newrifa_premio_imagem_url_file" accept="image/*" style="margin-top:6px;">
+    </div>
+    <div class="admin-field">
+      <label>Vídeo (opcional)</label>
+      <p class="admin-hint">Link do YouTube ou URL direta de um vídeo (.mp4). Se preenchido, aparece no lugar da foto no site.</p>
+      <input type="text" id="newrifa_video_url" placeholder="https://www.youtube.com/watch?v=...">
     </div>
     <div class="admin-field"><label>Preço por número (R$)</label><input type="number" id="newrifa_preco" value="20" step="0.01"></div>
     <div class="admin-field"><label>Total de números</label><input type="number" id="newrifa_total" value="1000" step="1"></div>
@@ -805,6 +817,28 @@ async function renderRifa(content) {
 
   content.querySelectorAll('[data-manage]').forEach(btn => {
     btn.addEventListener('click', () => renderRifaDetail(rifas.find(r => r.id === btn.dataset.manage)));
+  });
+
+  content.querySelectorAll('[data-editar]').forEach(btn => {
+    btn.addEventListener('click', () => renderRifaEditForm(rifas.find(r => r.id === btn.dataset.editar), content));
+  });
+
+  content.querySelectorAll('[data-excluir]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const rifa = rifas.find(r => r.id === btn.dataset.excluir);
+      if (!confirm(`Excluir a rifa "${rifa.titulo}"? Isso apaga também todos os números e contribuições dela. Não dá pra desfazer.`)) return;
+      const feedback = document.getElementById('feedback');
+      feedback.innerHTML = 'Excluindo...';
+      await supabaseClient.from('rifa_bilhetes').delete().eq('rifa_id', rifa.id);
+      await supabaseClient.from('rifa_contribuicoes_livres').delete().eq('rifa_id', rifa.id);
+      const { error } = await supabaseClient.from('rifas').delete().eq('id', rifa.id);
+      if (error) {
+        feedback.innerHTML = `<div class="admin-error">${escapeHtml(error.message)}</div>`;
+        return;
+      }
+      feedback.innerHTML = `<div class="admin-success">Rifa excluída.</div>`;
+      renderRifa(content);
+    });
   });
 
   document.getElementById('createRifaBtn').addEventListener('click', async () => {
@@ -820,6 +854,7 @@ async function renderRifa(content) {
         titulo: document.getElementById('newrifa_titulo').value,
         descricao: document.getElementById('newrifa_descricao').value,
         premio_imagem_url: imagemUrl || null,
+        video_url: document.getElementById('newrifa_video_url').value || null,
         preco_numero: Number(document.getElementById('newrifa_preco').value) || 0,
         total_numeros: total,
         data_sorteio: document.getElementById('newrifa_data_sorteio').value || null,
@@ -833,6 +868,67 @@ async function renderRifa(content) {
 
       feedback.innerHTML = `<div class="admin-success">Rifa criada com ${total} números!</div>`;
       renderRifa(content);
+    } catch (err) {
+      feedback.innerHTML = `<div class="admin-error">${escapeHtml(err.message)}</div>`;
+    }
+  });
+}
+
+function renderRifaEditForm(rifa, content) {
+  const detail = document.getElementById('rifaDetail');
+  detail.innerHTML = `
+    <h3>Editar rifa</h3>
+    <div id="editRifaFeedback"></div>
+    <div class="admin-field"><label>Título</label><input id="editrifa_titulo" value="${escapeHtml(rifa.titulo)}"></div>
+    <div class="admin-field"><label>Descrição</label><textarea id="editrifa_descricao" rows="3">${escapeHtml(rifa.descricao || '')}</textarea></div>
+    <div class="admin-field">
+      <label>Foto do prêmio</label>
+      <input type="text" id="editrifa_premio_imagem_url" value="${escapeHtml(rifa.premio_imagem_url || '')}" placeholder="URL ou nome de arquivo">
+      <input type="file" id="editrifa_premio_imagem_url_file" accept="image/*" style="margin-top:6px;">
+    </div>
+    <div class="admin-field">
+      <label>Vídeo (opcional)</label>
+      <input type="text" id="editrifa_video_url" value="${escapeHtml(rifa.video_url || '')}" placeholder="https://www.youtube.com/watch?v=...">
+    </div>
+    <div class="admin-field"><label>Preço por número (R$)</label><input type="number" id="editrifa_preco" value="${rifa.preco_numero}" step="0.01"></div>
+    <div class="admin-hint">O total de números (${rifa.total_numeros}) não pode ser alterado depois de criada.</div>
+    <div class="admin-field"><label>Data do sorteio</label><input type="date" id="editrifa_data_sorteio" value="${rifa.data_sorteio || ''}"></div>
+    <div class="admin-field">
+      <label>Status</label>
+      <select id="editrifa_status">
+        <option value="ativa" ${rifa.status === 'ativa' ? 'selected' : ''}>Ativa (aparece no site)</option>
+        <option value="encerrada" ${rifa.status === 'encerrada' ? 'selected' : ''}>Encerrada (some do site)</option>
+      </select>
+    </div>
+    <div class="admin-actions">
+      <button class="btn btn-primary" id="saveRifaEditBtn">Salvar alterações</button>
+      <button class="btn btn-outline" id="cancelRifaEditBtn">Cancelar</button>
+    </div>
+  `;
+
+  document.getElementById('cancelRifaEditBtn').addEventListener('click', () => { detail.innerHTML = ''; });
+
+  document.getElementById('saveRifaEditBtn').addEventListener('click', async () => {
+    const feedback = document.getElementById('editRifaFeedback');
+    feedback.innerHTML = 'Salvando...';
+    try {
+      let imagemUrl = document.getElementById('editrifa_premio_imagem_url').value;
+      const fileInput = document.getElementById('editrifa_premio_imagem_url_file');
+      if (fileInput.files[0]) imagemUrl = await uploadImage(fileInput.files[0]);
+
+      const { error } = await supabaseClient.from('rifas').update({
+        titulo: document.getElementById('editrifa_titulo').value,
+        descricao: document.getElementById('editrifa_descricao').value,
+        premio_imagem_url: imagemUrl || null,
+        video_url: document.getElementById('editrifa_video_url').value || null,
+        preco_numero: Number(document.getElementById('editrifa_preco').value) || 0,
+        data_sorteio: document.getElementById('editrifa_data_sorteio').value || null,
+        status: document.getElementById('editrifa_status').value,
+      }).eq('id', rifa.id);
+
+      if (error) throw error;
+      feedback.innerHTML = `<div class="admin-success">Alterações salvas!</div>`;
+      renderRifa(document.getElementById('adminContent'));
     } catch (err) {
       feedback.innerHTML = `<div class="admin-error">${escapeHtml(err.message)}</div>`;
     }

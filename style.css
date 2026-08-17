@@ -350,9 +350,17 @@ img { max-width: 100%; display: block; }
   color: var(--gray-light);
   font-weight: 600;
   text-align: center;
+  font-family: inherit;
+  font-size: 14.5px;
+  cursor: pointer;
+  transition: box-shadow .15s ease, transform .15s ease;
 }
-.partner-logo { max-height: 48px; max-width: 100%; }
-.partner-cta { border: 2px dashed rgba(31,36,48,0.15); background: transparent; }
+button.partner-box:hover { box-shadow: var(--shadow-md); transform: translateY(-2px); }
+.partner-logo { max-height: 48px; max-width: 100%; pointer-events: none; }
+.partner-cta { border: 2px dashed rgba(31,36,48,0.15); background: transparent; cursor: default; }
+.partner-cta:hover { box-shadow: none; transform: none; }
+.section-partners-top { padding: 28px 0 8px; }
+.section-partners-top .section-header { margin-bottom: 24px; }
 .partners-nav { flex-shrink: 0; width: 38px; height: 38px; border-radius: 50%; background: var(--white); box-shadow: var(--shadow-sm); border: none; cursor: pointer; font-size: 18px; color: var(--dark); display: flex; align-items: center; justify-content: center; }
 .partners-nav:hover { box-shadow: var(--shadow-md); }
 @media (max-width: 720px) {
@@ -466,8 +474,15 @@ img { max-width: 100%; display: block; }
 .campanha-progress-label strong { color: var(--green-dark); }
 
 /* ---- Rifa ---- */
-.rifa-header { display: grid; grid-template-columns: 0.9fr 1.1fr; gap: 40px; align-items: center; margin-bottom: 40px; }
-.rifa-premio-img { border-radius: var(--radius-lg); box-shadow: var(--shadow-lg); width: 100%; aspect-ratio: 4/3; object-fit: cover; }
+.rifas-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 24px; margin-bottom: 12px; }
+.rifa-card { background: var(--white); border-radius: var(--radius); overflow: hidden; box-shadow: var(--shadow-sm); border: 1px solid rgba(31,36,48,0.06); transition: transform .2s ease, box-shadow .2s ease; }
+.rifa-card:hover { transform: translateY(-6px); box-shadow: var(--shadow-lg); }
+.rifa-card-media { aspect-ratio: 4/3; overflow: hidden; background: var(--light-bg); }
+.rifa-card-media img, .rifa-card-media video, .rifa-card-media iframe { width: 100%; height: 100%; object-fit: cover; border: none; display: block; }
+.rifa-card-body { padding: 22px 24px 26px; }
+.rifa-card-body h3 { font-size: 18px; }
+.rifa-card-body p { font-size: 14.5px; }
+.rifa-numeros-wrap { margin-top: 40px; }
 .rifa-info .eyebrow { color: var(--yellow-dark); }
 .rifa-preco { display: inline-block; background: var(--dark); color: var(--white); font-weight: 700; padding: 8px 18px; border-radius: 999px; font-size: 14px; margin-bottom: 16px; }
 .rifa-sorteio-data { display: inline-block; margin: 0 0 0 10px; font-size: 14px; color: var(--gray); font-weight: 600; }

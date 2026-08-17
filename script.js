@@ -348,23 +348,77 @@ function renderDoar(d, hasRifa) {
   `;
 }
 
-function renderParceiros(rows) {
-  const el = document.getElementById('partnersGrid');
+let PARCEIROS_CACHE = [];
+
+function renderParceirosGrid(rows, gridId, prevId, nextId) {
+  const el = document.getElementById(gridId);
   if (!el) return;
   const real = Array.isArray(rows) ? rows.map(p => {
     const inner = p.logo_url ? `<img src="${escapeHtml(p.logo_url)}" alt="${escapeHtml(p.nome)}" class="partner-logo">` : escapeHtml(p.nome);
-    return p.link
-      ? `<a href="${escapeHtml(p.link)}" target="_blank" rel="noopener" class="partner-box">${inner}</a>`
-      : `<div class="partner-box">${inner}</div>`;
+    return `<button type="button" class="partner-box" data-parceiro="${p.id}">${inner}</button>`;
   }).join('') : '';
   el.innerHTML = real + `<div class="partner-box partner-cta">Sua empresa aqui</div>`;
 
-  document.getElementById('partnersPrev')?.addEventListener('click', () => {
+  el.querySelectorAll('[data-parceiro]').forEach(btn => {
+    btn.addEventListener('click', () => openParceiroModal(btn.dataset.parceiro));
+  });
+
+  document.getElementById(prevId)?.addEventListener('click', () => {
     el.scrollBy({ left: -240, behavior: 'smooth' });
   });
-  document.getElementById('partnersNext')?.addEventListener('click', () => {
+  document.getElementById(nextId)?.addEventListener('click', () => {
     el.scrollBy({ left: 240, behavior: 'smooth' });
   });
+}
+
+function renderParceiros(rows) {
+  PARCEIROS_CACHE = rows || [];
+  renderParceirosGrid(PARCEIROS_CACHE, 'partnersGridTop', 'partnersPrevTop', 'partnersNextTop');
+  renderParceirosGrid(PARCEIROS_CACHE, 'partnersGrid', 'partnersPrev', 'partnersNext');
+}
+
+function openParceiroModal(id) {
+  const p = PARCEIROS_CACHE.find(x => String(x.id) === String(id));
+  if (!p) return;
+  const content = document.getElementById('eventModalContent');
+  const fotos = Array.isArray(p.fotos) ? p.fotos : [];
+  const embed = youtubeEmbedUrl(p.video_url);
+
+  const midiaHtml = embed
+    ? `<div class="modal-hero" style="padding:0; overflow:hidden;"><iframe src="${embed}" title="${escapeHtml(p.nome)}" style="width:100%; height:100%; border:none;" allowfullscreen loading="lazy"></iframe></div>`
+    : p.video_url
+    ? `<video src="${escapeHtml(p.video_url)}" class="modal-hero" controls></video>`
+    : fotos.length > 0
+    ? `<img src="${escapeHtml(fotos[0])}" class="modal-hero" id="modalHeroImg" alt="${escapeHtml(p.nome)}">`
+    : p.logo_url
+    ? `<img src="${escapeHtml(p.logo_url)}" class="modal-hero" style="object-fit:contain; background:var(--light-bg);" alt="${escapeHtml(p.nome)}">`
+    : '';
+
+  content.innerHTML = `
+    ${midiaHtml}
+    ${fotos.length > 1 && !p.video_url ? `
+      <div class="modal-thumbs">
+        ${fotos.map((f, i) => `<img src="${escapeHtml(f)}" class="${i === 0 ? 'active' : ''}" data-src="${escapeHtml(f)}" alt="Foto ${i + 1} - ${escapeHtml(p.nome)}">`).join('')}
+      </div>` : ''}
+    <h2>${escapeHtml(p.nome)}</h2>
+    ${p.descricao ? `<p>${escapeHtml(p.descricao)}</p>` : ''}
+    <div class="modal-finance">
+      ${p.contato ? `<p><strong>Contato:</strong> ${escapeHtml(p.contato)}</p>` : ''}
+      ${p.link ? `<a href="${escapeHtml(p.link)}" target="_blank" rel="noopener" class="btn btn-primary">Visitar site</a>` : ''}
+    </div>
+  `;
+
+  content.querySelectorAll('.modal-thumbs img').forEach(thumb => {
+    thumb.addEventListener('click', () => {
+      document.getElementById('modalHeroImg').src = thumb.dataset.src;
+      content.querySelectorAll('.modal-thumbs img').forEach(t => t.classList.remove('active'));
+      thumb.classList.add('active');
+    });
+  });
+
+  const modal = document.getElementById('eventModal');
+  modal.classList.add('open');
+  document.body.style.overflow = 'hidden';
 }
 
 function renderBlog(rows) {
@@ -615,63 +669,118 @@ function renderCampanhas(rows) {
 }
 
 // ---- Rifa solidária ----
-function renderRifaSection(rifa, bilhetes) {
+let RIFAS_ATIVAS = [];
+
+function youtubeEmbedUrl(url) {
+  if (!url) return null;
+  const m = url.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([\w-]{11})/);
+  return m ? `https://www.youtube.com/embed/${m[1]}` : null;
+}
+
+function rifaMediaHtml(rifa) {
+  const embed = youtubeEmbedUrl(rifa.video_url);
+  if (embed) {
+    return `<div class="rifa-card-media"><iframe src="${embed}" title="${escapeHtml(rifa.titulo)}" loading="lazy" allowfullscreen></iframe></div>`;
+  }
+  if (rifa.video_url) {
+    return `<div class="rifa-card-media"><video src="${escapeHtml(rifa.video_url)}" controls></video></div>`;
+  }
+  if (rifa.premio_imagem_url) {
+    return `<div class="rifa-card-media"><img src="${escapeHtml(rifa.premio_imagem_url)}" alt="${escapeHtml(rifa.titulo)}" loading="lazy"></div>`;
+  }
+  return '';
+}
+
+function renderRifaSection(rifasAtivas) {
   const section = document.getElementById('rifa');
   const content = document.getElementById('rifaContent');
   if (!content) return;
-  if (!rifa) {
+  RIFAS_ATIVAS = rifasAtivas || [];
+  if (RIFAS_ATIVAS.length === 0) {
     if (section) section.style.display = 'none';
     return;
   }
   if (section) section.style.display = '';
 
-  CURRENT_RIFA = rifa;
-  RIFA_BILHETES = bilhetes;
-
-  const dataSorteioHtml = rifa.data_sorteio
-    ? `<p class="rifa-sorteio-data">🗓️ Sorteio em ${new Date(rifa.data_sorteio + 'T00:00:00').toLocaleDateString('pt-BR', { day: '2-digit', month: 'long', year: 'numeric' })}</p>`
-    : '';
-
   content.innerHTML = `
-    <div class="rifa-header">
-      ${rifa.premio_imagem_url ? `<img src="${escapeHtml(rifa.premio_imagem_url)}" alt="${escapeHtml(rifa.titulo)}" class="rifa-premio-img">` : ''}
-      <div class="rifa-info reveal">
-        <span class="eyebrow">Rifa Solidária</span>
-        <h2>${escapeHtml(rifa.titulo)}</h2>
-        <p>${escapeHtml(rifa.descricao)}</p>
-        <span class="rifa-preco">Cada número: ${formatBRL(rifa.preco_numero)}</span>
-        ${dataSorteioHtml}
-        <div class="hero-actions" style="margin-top:20px;">
-          <button class="btn btn-primary" id="rifaAjudarBtn">Ajudar / Escolher número</button>
-          <button class="btn btn-outline" id="rifaLivreBtn">Ajudar com outro valor</button>
+    <div class="section-header reveal">
+      <span class="eyebrow">Rifa Solidária</span>
+      <h2>${RIFAS_ATIVAS.length > 1 ? 'Rifas Ativas' : escapeHtml(RIFAS_ATIVAS[0].titulo)}</h2>
+    </div>
+    <div class="rifas-grid reveal" id="rifasGrid"></div>
+    <div id="rifaExpandido"></div>
+  `;
+
+  const grid = document.getElementById('rifasGrid');
+  grid.innerHTML = RIFAS_ATIVAS.map(rifa => {
+    const dataSorteioHtml = rifa.data_sorteio
+      ? `<p class="rifa-sorteio-data">🗓️ Sorteio em ${new Date(rifa.data_sorteio + 'T00:00:00').toLocaleDateString('pt-BR', { day: '2-digit', month: 'long', year: 'numeric' })}</p>`
+      : '';
+    return `
+      <div class="rifa-card">
+        ${rifaMediaHtml(rifa)}
+        <div class="rifa-card-body">
+          <h3>${escapeHtml(rifa.titulo)}</h3>
+          <p>${escapeHtml(rifa.descricao)}</p>
+          <span class="rifa-preco">Cada número: ${formatBRL(rifa.preco_numero)}</span>
+          ${dataSorteioHtml}
+          <div class="hero-actions" style="margin-top:16px;">
+            <button class="btn btn-primary" data-ver-numeros="${rifa.id}">Ajudar / Escolher número</button>
+            <button class="btn btn-outline" data-ajudar-livre="${rifa.id}">Ajudar com outro valor</button>
+          </div>
         </div>
       </div>
-    </div>
-    <div class="rifa-numeros-wrap" id="rifaNumerosWrap" style="display:none;">
-      <div class="rifa-legend reveal">
+    `;
+  }).join('');
+
+  grid.querySelectorAll('[data-ver-numeros]').forEach(btn => {
+    btn.addEventListener('click', () => toggleRifaExpandida(btn.dataset.verNumeros));
+  });
+  grid.querySelectorAll('[data-ajudar-livre]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      CURRENT_RIFA = RIFAS_ATIVAS.find(r => r.id === btn.dataset.ajudarLivre);
+      openRifaLivreModal();
+    });
+  });
+}
+
+async function toggleRifaExpandida(rifaId) {
+  const expandido = document.getElementById('rifaExpandido');
+  if (!expandido) return;
+  if (CURRENT_RIFA && CURRENT_RIFA.id === rifaId && expandido.dataset.aberto === '1') {
+    expandido.innerHTML = '';
+    expandido.dataset.aberto = '0';
+    CURRENT_RIFA = null;
+    return;
+  }
+
+  const rifa = RIFAS_ATIVAS.find(r => r.id === rifaId);
+  if (!rifa) return;
+  CURRENT_RIFA = rifa;
+  RIFA_SELECIONADOS = [];
+
+  expandido.dataset.aberto = '1';
+  expandido.innerHTML = `
+    <div class="rifa-numeros-wrap reveal">
+      <h3>${escapeHtml(rifa.titulo)} — escolha seus números</h3>
+      <div class="rifa-legend">
         <span><i style="background:var(--blue)"></i> Disponível</span>
         <span><i style="background:var(--yellow-dark)"></i> Reservado</span>
         <span><i style="background:var(--gray-light)"></i> Pago</span>
       </div>
-      <div class="rifa-numeros-grid reveal" id="rifaNumerosGrid"></div>
+      <div class="rifa-numeros-grid" id="rifaNumerosGrid"></div>
       <div class="rifa-selecao-bar" id="rifaSelecaoBar" style="display:none;">
         <span id="rifaSelecaoInfo"></span>
         <button class="btn btn-primary" id="rifaContinuarBtn">Continuar</button>
       </div>
     </div>
   `;
-
-  RIFA_SELECIONADOS = [];
-  renderRifaGrid();
-  document.getElementById('rifaLivreBtn').addEventListener('click', openRifaLivreModal);
   document.getElementById('rifaContinuarBtn').addEventListener('click', openRifaMultiModal);
-  document.getElementById('rifaAjudarBtn').addEventListener('click', () => {
-    const wrap = document.getElementById('rifaNumerosWrap');
-    const showing = wrap.style.display !== 'none';
-    wrap.style.display = showing ? 'none' : '';
-    document.getElementById('rifaAjudarBtn').textContent = showing ? 'Ajudar / Escolher número' : 'Ocultar números';
-    if (!showing) wrap.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-  });
+
+  const { data } = await supabaseClient.from('rifa_bilhetes').select('*').eq('rifa_id', rifaId).order('numero');
+  RIFA_BILHETES = data || [];
+  renderRifaGrid();
+  expandido.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
 
 function renderRifaGrid() {
@@ -875,7 +984,7 @@ async function loadContent() {
     supabaseClient.from('blog_posts').select('*').order('ordem'),
     supabaseClient.from('banners').select('*').order('ordem'),
     supabaseClient.from('campanhas').select('*').order('ordem'),
-    supabaseClient.from('rifas').select('*').eq('status', 'ativa').order('criado_em', { ascending: false }).limit(1),
+    supabaseClient.from('rifas').select('*').eq('status', 'ativa').order('criado_em', { ascending: false }),
     supabaseClient.from('prestacao_contas').select('*').order('ordem'),
   ]);
 
@@ -900,13 +1009,7 @@ async function loadContent() {
   renderEvents();
   renderTransparency(prestacaoRows || []);
 
-  const rifaAtiva = (rifasRows || [])[0] || null;
-  if (rifaAtiva) {
-    const { data: bilhetes } = await supabaseClient.from('rifa_bilhetes').select('*').eq('rifa_id', rifaAtiva.id).order('numero');
-    renderRifaSection(rifaAtiva, bilhetes || []);
-  } else {
-    renderRifaSection(null, []);
-  }
+  renderRifaSection(rifasRows || []);
 
   setupReveal();
 }
