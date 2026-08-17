@@ -636,11 +636,14 @@ function renderBannerCarousel(banners) {
 }
 
 // ---- Vaquinhas (campanhas) ----
+let CAMPANHAS_CACHE = [];
+
 function renderCampanhas(rows) {
   const section = document.getElementById('vaquinhas');
   const grid = document.getElementById('campanhasGrid');
   if (!grid) return;
   const ativas = (rows || []).filter(c => c.ativa !== false);
+  CAMPANHAS_CACHE = ativas;
   if (section) section.style.display = ativas.length === 0 ? 'none' : '';
 
   grid.innerHTML = ativas.map(c => {
@@ -648,7 +651,6 @@ function renderCampanhas(rows) {
     const arrecadado = Number(c.arrecadado || 0);
     const pct = meta ? Math.min(100, Math.round((arrecadado / meta) * 100)) : null;
     const capa = Array.isArray(c.fotos) && c.fotos[0];
-    const msg = encodeURIComponent(c.whatsapp_texto || `Olá! Quero ajudar na campanha "${c.titulo}".`);
     return `
       <div class="campanha-card">
         ${capa ? `<div class="campanha-media"><img src="${escapeHtml(capa)}" alt="${escapeHtml(c.titulo)}" loading="lazy"></div>` : ''}
@@ -661,11 +663,15 @@ function renderCampanhas(rows) {
           ` : `
             <div class="campanha-progress-label"><strong>${formatBRL(arrecadado)}</strong><span>arrecadados até agora</span></div>
           `}
-          <a href="https://wa.me/5527981067522?text=${msg}" target="_blank" rel="noopener" class="btn btn-primary">Quero ajudar</a>
+          <button type="button" class="btn btn-primary" data-campanha-ajudar="${c.id}">Quero ajudar</button>
         </div>
       </div>
     `;
   }).join('');
+
+  grid.querySelectorAll('[data-campanha-ajudar]').forEach(btn => {
+    btn.addEventListener('click', () => openCampanhaModal(btn.dataset.campanhaAjudar));
+  });
 }
 
 // ---- Rifa solidária ----
@@ -827,16 +833,68 @@ async function refreshRifaBilhetes() {
   renderRifaGrid();
 }
 
-function pixInstructionsHtml(valor, referencia) {
-  const msg = encodeURIComponent(`Olá! Fiz o pagamento Pix de ${formatBRL(valor)} referente a: ${referencia}. Segue o comprovante:`);
-  return `
-    <div class="rifa-pix-box">
-      <p style="margin-bottom:10px;"><strong>Pague ${formatBRL(valor)} via Pix</strong></p>
-      <p class="chave">${escapeHtml(PIX_INFO.chave || 'chave não configurada')}</p>
-      <p style="margin:6px 0 16px;">${escapeHtml(PIX_INFO.tipo || '')} · ${escapeHtml(PIX_INFO.nome_beneficiario || '')}</p>
-      <a href="https://wa.me/5527981067522?text=${msg}" target="_blank" rel="noopener" class="btn btn-primary">Enviar comprovante pelo WhatsApp</a>
-    </div>
+// ---- Pagamento Pix (Mercado Pago) ----
+let PIX_POLL_INTERVAL = null;
+
+function stopPixPolling() {
+  if (PIX_POLL_INTERVAL) { clearInterval(PIX_POLL_INTERVAL); PIX_POLL_INTERVAL = null; }
+}
+
+async function iniciarPagamentoPix(container, payload, onAprovado) {
+  const gerando = document.createElement('p');
+  gerando.className = 'admin-hint';
+  gerando.id = 'pixGerando';
+  gerando.textContent = 'Gerando Pix...';
+  container.appendChild(gerando);
+
+  const { data, error } = await supabaseClient.functions.invoke('create-pix-payment', { body: payload });
+  document.getElementById('pixGerando')?.remove();
+
+  if (error || !data || data.error) {
+    const err = document.createElement('div');
+    err.className = 'admin-error';
+    err.textContent = (data && data.error) || 'Não foi possível gerar o Pix. Tente novamente.';
+    container.appendChild(err);
+    return;
+  }
+
+  const box = document.createElement('div');
+  box.className = 'rifa-pix-box';
+  box.id = 'pixBox';
+  box.innerHTML = `
+    <p style="margin-bottom:10px; text-align:center;"><strong>Pague ${formatBRL(data.valor)} via Pix</strong></p>
+    <img src="data:image/png;base64,${data.qr_code_base64}" alt="QR Code Pix" style="width:200px;height:200px;display:block;margin:0 auto 14px;border-radius:8px;">
+    <p style="font-size:12px;color:var(--gray-light);margin-bottom:6px;text-align:center;">Ou copie o código Pix (copia e cola):</p>
+    <p class="chave" style="font-size:11px;word-break:break-all;">${escapeHtml(data.qr_code)}</p>
+    <button class="btn btn-outline" id="pixCopiarBtn" type="button" style="margin-top:10px;width:100%;">Copiar código Pix</button>
+    <p id="pixStatusMsg" style="margin-top:14px;font-size:13.5px;color:var(--gray);text-align:center;">⏳ Aguardando confirmação do pagamento...</p>
   `;
+  container.appendChild(box);
+
+  document.getElementById('pixCopiarBtn').addEventListener('click', async () => {
+    try {
+      await navigator.clipboard.writeText(data.qr_code);
+      const btn = document.getElementById('pixCopiarBtn');
+      btn.textContent = 'Copiado!';
+      setTimeout(() => { const b = document.getElementById('pixCopiarBtn'); if (b) b.textContent = 'Copiar código Pix'; }, 2000);
+    } catch (e) { /* clipboard indisponível, usuário copia manualmente */ }
+  });
+
+  stopPixPolling();
+  PIX_POLL_INTERVAL = setInterval(async () => {
+    const { data: statusData } = await supabaseClient.functions.invoke('check-pix-status', { body: { pagamento_id: data.pagamento_id } });
+    if (!statusData) return;
+    const msgEl = document.getElementById('pixStatusMsg');
+    if (statusData.status === 'aprovado') {
+      stopPixPolling();
+      const boxEl = document.getElementById('pixBox');
+      if (boxEl) boxEl.innerHTML = `<p style="text-align:center; color:var(--green); font-weight:700;">✅ Pagamento confirmado! Muito obrigado.</p>`;
+      if (onAprovado) onAprovado();
+    } else if (statusData.status === 'expirado' || statusData.status === 'cancelado') {
+      stopPixPolling();
+      if (msgEl) msgEl.innerHTML = '⚠️ O Pix expirou ou foi cancelado. Feche e tente novamente.';
+    }
+  }, 4000);
 }
 
 function openRifaMultiModal() {
@@ -847,22 +905,24 @@ function openRifaMultiModal() {
     .sort((a, b) => a.numero - b.numero);
   if (bilhetes.length === 0) return;
 
-  const ids = bilhetes.map(b => b.id);
+  const numerosArr = bilhetes.map(b => b.numero);
   const numerosStr = bilhetes.map(b => String(b.numero).padStart(3, '0')).join(', ');
   const total = bilhetes.length * Number(CURRENT_RIFA.preco_numero);
   const plural = bilhetes.length > 1;
+  const rifaIdAtual = CURRENT_RIFA.id;
 
   const content = document.getElementById('rifaModalContent');
   content.innerHTML = `
     <div style="padding:28px;">
       <h2>${bilhetes.length} número${plural ? 's' : ''} selecionado${plural ? 's' : ''}</h2>
       <p>Números: <strong>${numerosStr}</strong></p>
-      <p>Preencha seus dados para reservar por ${formatBRL(total)}.</p>
+      <p>Preencha seus dados para pagar ${formatBRL(total)} via Pix.</p>
       <div class="rifa-form">
         <div class="admin-field"><label>Seu nome</label><input id="rifaNome" required></div>
         <div class="admin-field"><label>WhatsApp</label><input id="rifaTelefone" required placeholder="(27) 9####-####"></div>
+        <div class="admin-field"><label>E-mail</label><input id="rifaEmail" type="email" required></div>
         <div id="rifaFormFeedback"></div>
-        <button class="btn btn-primary" id="rifaReservarBtn">Reservar ${plural ? 'estes números' : 'este número'}</button>
+        <button class="btn btn-primary" id="rifaReservarBtn">Gerar Pix</button>
       </div>
     </div>
   `;
@@ -872,45 +932,27 @@ function openRifaMultiModal() {
   document.getElementById('rifaReservarBtn').addEventListener('click', async () => {
     const nome = document.getElementById('rifaNome').value.trim();
     const telefone = document.getElementById('rifaTelefone').value.trim();
+    const email = document.getElementById('rifaEmail').value.trim();
     const feedback = document.getElementById('rifaFormFeedback');
-    if (!nome || !telefone) {
-      feedback.innerHTML = `<div class="admin-error">Preencha nome e WhatsApp.</div>`;
+    if (!nome || !telefone || !email) {
+      feedback.innerHTML = `<div class="admin-error">Preencha nome, WhatsApp e e-mail.</div>`;
       return;
     }
-    const { data, error } = await supabaseClient
-      .from('rifa_bilhetes')
-      .update({ status: 'reservado', comprador_nome: nome, comprador_telefone: telefone, reservado_em: new Date().toISOString() })
-      .in('id', ids)
-      .eq('status', 'disponivel')
-      .select();
+    document.getElementById('rifaReservarBtn').disabled = true;
+    feedback.innerHTML = '';
 
-    if (error || !data || data.length !== ids.length) {
-      if (data && data.length > 0) {
-        await supabaseClient
-          .from('rifa_bilhetes')
-          .update({ status: 'disponivel', comprador_nome: null, comprador_telefone: null, reservado_em: null })
-          .in('id', data.map(d => d.id));
-      }
-      feedback.innerHTML = `<div class="admin-error">Um ou mais números acabaram de ser reservados por outra pessoa. Feche e escolha outros.</div>`;
+    await iniciarPagamentoPix(content, {
+      tipo: 'rifa_numero', rifa_id: rifaIdAtual, numeros: numerosArr, nome, telefone, email,
+    }, () => {
       RIFA_SELECIONADOS = [];
       refreshRifaBilhetes();
-      return;
-    }
-
-    RIFA_SELECIONADOS = [];
-    content.innerHTML = `
-      <div style="padding:28px;">
-        <h2>Número${plural ? 's' : ''} ${numerosStr} reservado${plural ? 's' : ''}!</h2>
-        <p>Você tem 30 minutos para pagar antes que ${plural ? 'eles voltem' : 'ele volte'} a ficar disponível.</p>
-        ${pixInstructionsHtml(total, `número${plural ? 's' : ''} ${numerosStr} da rifa`)}
-      </div>
-    `;
-    refreshRifaBilhetes();
+    });
   });
 }
 
 function openRifaLivreModal() {
   const content = document.getElementById('rifaModalContent');
+  const rifaIdAtual = CURRENT_RIFA.id;
   content.innerHTML = `
     <div style="padding:28px;">
       <h2>Quero ajudar com outro valor</h2>
@@ -918,9 +960,10 @@ function openRifaLivreModal() {
       <div class="rifa-form">
         <div class="admin-field"><label>Seu nome</label><input id="rifaLivreNome" required></div>
         <div class="admin-field"><label>WhatsApp</label><input id="rifaLivreTelefone" required placeholder="(27) 9####-####"></div>
+        <div class="admin-field"><label>E-mail</label><input id="rifaLivreEmail" type="email" required></div>
         <div class="admin-field"><label>Valor (R$)</label><input id="rifaLivreValor" type="number" min="1" step="0.01" required></div>
         <div id="rifaLivreFeedback"></div>
-        <button class="btn btn-primary" id="rifaLivreSubmitBtn">Continuar</button>
+        <button class="btn btn-primary" id="rifaLivreSubmitBtn">Gerar Pix</button>
       </div>
     </div>
   `;
@@ -930,23 +973,53 @@ function openRifaLivreModal() {
   document.getElementById('rifaLivreSubmitBtn').addEventListener('click', async () => {
     const nome = document.getElementById('rifaLivreNome').value.trim();
     const telefone = document.getElementById('rifaLivreTelefone').value.trim();
+    const email = document.getElementById('rifaLivreEmail').value.trim();
     const valor = Number(document.getElementById('rifaLivreValor').value);
     const feedback = document.getElementById('rifaLivreFeedback');
-    if (!nome || !telefone || !valor || valor <= 0) {
+    if (!nome || !telefone || !email || !valor || valor <= 0) {
       feedback.innerHTML = `<div class="admin-error">Preencha todos os campos com um valor válido.</div>`;
       return;
     }
-    const { error } = await supabaseClient.from('rifa_contribuicoes_livres').insert({ rifa_id: CURRENT_RIFA.id, nome, telefone, valor });
-    if (error) {
-      feedback.innerHTML = `<div class="admin-error">${escapeHtml(error.message)}</div>`;
+    document.getElementById('rifaLivreSubmitBtn').disabled = true;
+    feedback.innerHTML = '';
+    await iniciarPagamentoPix(content, { tipo: 'rifa_livre', rifa_id: rifaIdAtual, valor, nome, telefone, email }, null);
+  });
+}
+
+function openCampanhaModal(id) {
+  const c = CAMPANHAS_CACHE.find(x => String(x.id) === String(id));
+  if (!c) return;
+  const content = document.getElementById('rifaModalContent');
+  content.innerHTML = `
+    <div style="padding:28px;">
+      <h2>Ajudar — ${escapeHtml(c.titulo)}</h2>
+      <p>Contribua com qualquer valor via Pix.</p>
+      <div class="rifa-form">
+        <div class="admin-field"><label>Seu nome</label><input id="campNome" required></div>
+        <div class="admin-field"><label>WhatsApp</label><input id="campTelefone" required placeholder="(27) 9####-####"></div>
+        <div class="admin-field"><label>E-mail</label><input id="campEmail" type="email" required></div>
+        <div class="admin-field"><label>Valor (R$)</label><input id="campValor" type="number" min="1" step="0.01" required></div>
+        <div id="campFeedback"></div>
+        <button class="btn btn-primary" id="campSubmitBtn">Gerar Pix</button>
+      </div>
+    </div>
+  `;
+  document.getElementById('rifaModal').classList.add('open');
+  document.body.style.overflow = 'hidden';
+
+  document.getElementById('campSubmitBtn').addEventListener('click', async () => {
+    const nome = document.getElementById('campNome').value.trim();
+    const telefone = document.getElementById('campTelefone').value.trim();
+    const email = document.getElementById('campEmail').value.trim();
+    const valor = Number(document.getElementById('campValor').value);
+    const feedback = document.getElementById('campFeedback');
+    if (!nome || !telefone || !email || !valor || valor <= 0) {
+      feedback.innerHTML = `<div class="admin-error">Preencha todos os campos com um valor válido.</div>`;
       return;
     }
-    content.innerHTML = `
-      <div style="padding:28px;">
-        <h2>Obrigado, ${escapeHtml(nome)}!</h2>
-        ${pixInstructionsHtml(valor, `contribuição livre para a ${escapeHtml(CURRENT_RIFA.titulo)}`)}
-      </div>
-    `;
+    document.getElementById('campSubmitBtn').disabled = true;
+    feedback.innerHTML = '';
+    await iniciarPagamentoPix(content, { tipo: 'campanha', campanha_id: c.id, valor, nome, telefone, email }, null);
   });
 }
 
@@ -960,6 +1033,7 @@ function setupRifaModal() {
 function closeRifaModal() {
   document.getElementById('rifaModal').classList.remove('open');
   document.body.style.overflow = '';
+  stopPixPolling();
 }
 
 // ---- Carregamento dos dados do Supabase ----
