@@ -10,6 +10,7 @@ let EVENTOS = [];
 let PIX_INFO = {};
 let CURRENT_RIFA = null;
 let RIFA_BILHETES = [];
+let RIFA_SELECIONADOS = [];
 let BANNER_TIMER = null;
 
 function formatBRL(n) {
@@ -653,11 +654,17 @@ function renderRifaSection(rifa, bilhetes) {
         <span><i style="background:var(--gray-light)"></i> Pago</span>
       </div>
       <div class="rifa-numeros-grid reveal" id="rifaNumerosGrid"></div>
+      <div class="rifa-selecao-bar" id="rifaSelecaoBar" style="display:none;">
+        <span id="rifaSelecaoInfo"></span>
+        <button class="btn btn-primary" id="rifaContinuarBtn">Continuar</button>
+      </div>
     </div>
   `;
 
+  RIFA_SELECIONADOS = [];
   renderRifaGrid();
   document.getElementById('rifaLivreBtn').addEventListener('click', openRifaLivreModal);
+  document.getElementById('rifaContinuarBtn').addEventListener('click', openRifaMultiModal);
   document.getElementById('rifaAjudarBtn').addEventListener('click', () => {
     const wrap = document.getElementById('rifaNumerosWrap');
     const showing = wrap.style.display !== 'none';
@@ -670,12 +677,38 @@ function renderRifaSection(rifa, bilhetes) {
 function renderRifaGrid() {
   const grid = document.getElementById('rifaNumerosGrid');
   if (!grid) return;
+  RIFA_SELECIONADOS = RIFA_SELECIONADOS.filter(id => RIFA_BILHETES.find(b => b.id === id)?.status === 'disponivel');
   grid.innerHTML = RIFA_BILHETES.map(b => `
-    <button class="rifa-numero ${b.status}" data-id="${b.id}" ${b.status !== 'disponivel' ? 'disabled' : ''}>${String(b.numero).padStart(3, '0')}</button>
+    <button class="rifa-numero ${b.status}${RIFA_SELECIONADOS.includes(b.id) ? ' selecionado' : ''}" data-id="${b.id}" ${b.status !== 'disponivel' ? 'disabled' : ''}>${String(b.numero).padStart(3, '0')}</button>
   `).join('');
   grid.querySelectorAll('.rifa-numero.disponivel').forEach(btn => {
-    btn.addEventListener('click', () => openRifaNumeroModal(btn.dataset.id));
+    btn.addEventListener('click', () => toggleRifaNumero(btn.dataset.id));
   });
+  updateRifaSelecaoBar();
+}
+
+function toggleRifaNumero(id) {
+  const idx = RIFA_SELECIONADOS.indexOf(id);
+  if (idx === -1) RIFA_SELECIONADOS.push(id); else RIFA_SELECIONADOS.splice(idx, 1);
+  renderRifaGrid();
+}
+
+function updateRifaSelecaoBar() {
+  const bar = document.getElementById('rifaSelecaoBar');
+  const info = document.getElementById('rifaSelecaoInfo');
+  if (!bar || !info) return;
+  if (RIFA_SELECIONADOS.length === 0) {
+    bar.style.display = 'none';
+    return;
+  }
+  bar.style.display = '';
+  const bilhetes = RIFA_SELECIONADOS
+    .map(id => RIFA_BILHETES.find(b => b.id === id))
+    .filter(Boolean)
+    .sort((a, b) => a.numero - b.numero);
+  const total = bilhetes.length * Number(CURRENT_RIFA.preco_numero);
+  const numeros = bilhetes.map(b => String(b.numero).padStart(3, '0')).join(', ');
+  info.innerHTML = `<strong>${bilhetes.length}</strong> número${bilhetes.length > 1 ? 's' : ''} selecionado${bilhetes.length > 1 ? 's' : ''}: ${numeros} — Total: <strong>${formatBRL(total)}</strong>`;
 }
 
 async function refreshRifaBilhetes() {
@@ -697,19 +730,30 @@ function pixInstructionsHtml(valor, referencia) {
   `;
 }
 
-function openRifaNumeroModal(bilheteId) {
-  const bilhete = RIFA_BILHETES.find(b => b.id === bilheteId);
-  if (!bilhete) return;
+function openRifaMultiModal() {
+  if (RIFA_SELECIONADOS.length === 0) return;
+  const bilhetes = RIFA_SELECIONADOS
+    .map(id => RIFA_BILHETES.find(b => b.id === id))
+    .filter(Boolean)
+    .sort((a, b) => a.numero - b.numero);
+  if (bilhetes.length === 0) return;
+
+  const ids = bilhetes.map(b => b.id);
+  const numerosStr = bilhetes.map(b => String(b.numero).padStart(3, '0')).join(', ');
+  const total = bilhetes.length * Number(CURRENT_RIFA.preco_numero);
+  const plural = bilhetes.length > 1;
+
   const content = document.getElementById('rifaModalContent');
   content.innerHTML = `
     <div style="padding:28px;">
-      <h2>Número ${String(bilhete.numero).padStart(3, '0')}</h2>
-      <p>Preencha seus dados para reservar este número por ${formatBRL(CURRENT_RIFA.preco_numero)}.</p>
+      <h2>${bilhetes.length} número${plural ? 's' : ''} selecionado${plural ? 's' : ''}</h2>
+      <p>Números: <strong>${numerosStr}</strong></p>
+      <p>Preencha seus dados para reservar por ${formatBRL(total)}.</p>
       <div class="rifa-form">
         <div class="admin-field"><label>Seu nome</label><input id="rifaNome" required></div>
         <div class="admin-field"><label>WhatsApp</label><input id="rifaTelefone" required placeholder="(27) 9####-####"></div>
         <div id="rifaFormFeedback"></div>
-        <button class="btn btn-primary" id="rifaReservarBtn">Reservar este número</button>
+        <button class="btn btn-primary" id="rifaReservarBtn">Reservar ${plural ? 'estes números' : 'este número'}</button>
       </div>
     </div>
   `;
@@ -727,20 +771,29 @@ function openRifaNumeroModal(bilheteId) {
     const { data, error } = await supabaseClient
       .from('rifa_bilhetes')
       .update({ status: 'reservado', comprador_nome: nome, comprador_telefone: telefone, reservado_em: new Date().toISOString() })
-      .eq('id', bilheteId)
+      .in('id', ids)
+      .eq('status', 'disponivel')
       .select();
 
-    if (error || !data || data.length === 0) {
-      feedback.innerHTML = `<div class="admin-error">Esse número acabou de ser reservado por outra pessoa. Feche e escolha outro.</div>`;
+    if (error || !data || data.length !== ids.length) {
+      if (data && data.length > 0) {
+        await supabaseClient
+          .from('rifa_bilhetes')
+          .update({ status: 'disponivel', comprador_nome: null, comprador_telefone: null, reservado_em: null })
+          .in('id', data.map(d => d.id));
+      }
+      feedback.innerHTML = `<div class="admin-error">Um ou mais números acabaram de ser reservados por outra pessoa. Feche e escolha outros.</div>`;
+      RIFA_SELECIONADOS = [];
       refreshRifaBilhetes();
       return;
     }
 
+    RIFA_SELECIONADOS = [];
     content.innerHTML = `
       <div style="padding:28px;">
-        <h2>Número ${String(bilhete.numero).padStart(3, '0')} reservado!</h2>
-        <p>Você tem 30 minutos para pagar antes que o número volte a ficar disponível.</p>
-        ${pixInstructionsHtml(CURRENT_RIFA.preco_numero, `número ${String(bilhete.numero).padStart(3, '0')} da rifa`)}
+        <h2>Número${plural ? 's' : ''} ${numerosStr} reservado${plural ? 's' : ''}!</h2>
+        <p>Você tem 30 minutos para pagar antes que ${plural ? 'eles voltem' : 'ele volte'} a ficar disponível.</p>
+        ${pixInstructionsHtml(total, `número${plural ? 's' : ''} ${numerosStr} da rifa`)}
       </div>
     `;
     refreshRifaBilhetes();
@@ -858,6 +911,78 @@ async function loadContent() {
   setupReveal();
 }
 
+// ---- Assistente VIVA ----
+let VIVA_HISTORY = [];
+
+function setupVivaChat() {
+  const widget = document.getElementById('vivaWidget');
+  const button = document.getElementById('vivaButton');
+  const closeBtn = document.getElementById('vivaClose');
+  const form = document.getElementById('vivaForm');
+  const input = document.getElementById('vivaInput');
+  const messages = document.getElementById('vivaMessages');
+  if (!widget || !button || !form) return;
+
+  function addMessage(text, who) {
+    const div = document.createElement('div');
+    div.className = `viva-msg viva-msg-${who}`;
+    div.textContent = text;
+    messages.appendChild(div);
+    messages.scrollTop = messages.scrollHeight;
+    return div;
+  }
+
+  function addTyping() {
+    const div = document.createElement('div');
+    div.className = 'viva-msg-typing';
+    div.innerHTML = '<span class="viva-typing-dots"><span></span><span></span><span></span></span>';
+    messages.appendChild(div);
+    messages.scrollTop = messages.scrollHeight;
+    return div;
+  }
+
+  let opened = false;
+  button.addEventListener('click', () => {
+    widget.classList.toggle('open');
+    if (widget.classList.contains('open') && !opened) {
+      opened = true;
+      addMessage('Oi! Eu sou a VIVA, assistente virtual do Instituto CVB 💚 Posso te ajudar a conhecer nossos projetos, como ajudar, voluntariado, a rifa solidária ou qualquer dúvida sobre o instituto. Pode perguntar!', 'bot');
+      input.focus();
+    }
+  });
+
+  closeBtn?.addEventListener('click', () => widget.classList.remove('open'));
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const text = input.value.trim();
+    if (!text) return;
+    input.value = '';
+    addMessage(text, 'user');
+    VIVA_HISTORY.push({ role: 'user', text });
+
+    const typingEl = addTyping();
+    let lang = 'pt';
+    try { lang = localStorage.getItem('cvb_lang') || 'pt'; } catch (e) {}
+
+    try {
+      const { data, error } = await supabaseClient.functions.invoke('chat-viva', {
+        body: { message: text, history: VIVA_HISTORY.slice(0, -1), lang },
+      });
+      typingEl.remove();
+      if (error || !data || data.error) {
+        addMessage('Desculpe, não consegui responder agora. Tente novamente em instantes.', 'bot');
+        return;
+      }
+      addMessage(data.reply, 'bot');
+      VIVA_HISTORY.push({ role: 'model', text: data.reply });
+    } catch (err) {
+      typingEl.remove();
+      addMessage('Desculpe, não consegui responder agora. Tente novamente em instantes.', 'bot');
+    }
+  });
+}
+
 document.getElementById('year').textContent = new Date().getFullYear();
 setupMenu();
 setupHeaderScroll();
@@ -866,6 +991,11 @@ setupCrmForm();
 setupLangSwitcher();
 setupModal();
 setupRifaModal();
+setupVivaChat();
 loadContent().then(() => {
   if (PENDING_LANG) applyTranslation(PENDING_LANG);
+  if (window.location.hash) {
+    const alvo = document.querySelector(window.location.hash);
+    if (alvo) setTimeout(() => alvo.scrollIntoView({ block: 'start' }), 50);
+  }
 });
