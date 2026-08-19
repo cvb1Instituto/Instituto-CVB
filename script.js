@@ -722,12 +722,16 @@ function renderRifaSection(rifasAtivas) {
   }
   if (section) section.style.display = '';
 
+  // Quando só existe uma rifa, ela vira um card largo: imagem menor (sem corte) de
+  // um lado e o texto do outro, pra caber tudo na tela sem cortar o cartaz.
+  const unica = RIFAS_ATIVAS.length === 1;
+
   content.innerHTML = `
     <div class="section-header reveal">
       <span class="eyebrow">Rifa Solidária</span>
       <h2>${RIFAS_ATIVAS.length > 1 ? 'Rifas Ativas' : escapeHtml(RIFAS_ATIVAS[0].titulo)}</h2>
     </div>
-    <div class="rifas-grid reveal" id="rifasGrid"></div>
+    <div class="rifas-grid${unica ? ' rifas-grid--single' : ''} reveal" id="rifasGrid"></div>
     <div id="rifaExpandido"></div>
   `;
 
@@ -737,11 +741,12 @@ function renderRifaSection(rifasAtivas) {
       ? `<p class="rifa-sorteio-data">🗓️ Sorteio em ${new Date(rifa.data_sorteio + 'T00:00:00').toLocaleDateString('pt-BR', { day: '2-digit', month: 'long', year: 'numeric' })}</p>`
       : '';
     return `
-      <div class="rifa-card">
+      <div class="rifa-card${unica ? ' rifa-card--wide' : ''}">
         ${rifaMediaHtml(rifa)}
         <div class="rifa-card-body">
-          <h3>${escapeHtml(rifa.titulo)}</h3>
-          <p>${escapeHtml(rifa.descricao)}</p>
+          ${unica ? '' : `<h3>${escapeHtml(rifa.titulo)}</h3>`}
+          <p${unica ? ' class="rifa-desc-clamp"' : ''}>${escapeHtml(rifa.descricao)}</p>
+          ${unica ? '<button type="button" class="rifa-ler-mais" data-ler-mais>Ler mais</button>' : ''}
           <span class="rifa-preco">Cada número: ${formatBRL(rifa.preco_numero)}</span>
           ${dataSorteioHtml}
           <div class="hero-actions" style="margin-top:16px;">
@@ -752,6 +757,20 @@ function renderRifaSection(rifasAtivas) {
       </div>
     `;
   }).join('');
+
+  grid.querySelectorAll('[data-ler-mais]').forEach(btn => {
+    const p = btn.previousElementSibling;
+    if (!p) { btn.remove(); return; }
+    if (p.scrollHeight <= p.clientHeight + 2) {
+      p.classList.remove('rifa-desc-clamp');
+      btn.remove();
+      return;
+    }
+    btn.addEventListener('click', () => {
+      const recolhido = p.classList.toggle('rifa-desc-clamp');
+      btn.textContent = recolhido ? 'Ler mais' : 'Ler menos';
+    });
+  });
 
   grid.querySelectorAll('[data-ver-numeros]').forEach(btn => {
     btn.addEventListener('click', () => toggleRifaExpandida(btn.dataset.verNumeros));
@@ -782,7 +801,8 @@ async function toggleRifaExpandida(rifaId) {
   expandido.dataset.aberto = '1';
   expandido.innerHTML = `
     <div class="rifa-numeros-wrap reveal">
-      <h3>${escapeHtml(rifa.titulo)} — escolha seus números</h3>
+      <h3>Escolha seus números</h3>
+      <p class="rifa-numeros-hint">Cada número: <strong>${formatBRL(rifa.preco_numero)}</strong> — clique nos números que quiser (pode escolher vários) e depois em Continuar.</p>
       <div class="rifa-legend">
         <span><i style="background:var(--blue)"></i> Disponível</span>
         <span><i style="background:var(--yellow-dark)"></i> Reservado</span>
@@ -801,7 +821,17 @@ async function toggleRifaExpandida(rifaId) {
   const { data } = await supabaseClient.from('rifa_bilhetes').select('*').eq('rifa_id', rifaId).order('numero');
   RIFA_BILHETES = data || [];
   renderRifaGrid();
-  expandido.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  scrollAbaixoDoHeader(expandido);
+}
+
+// Rola até o elemento descontando o header fixo, pra o painel aberto começar
+// logo abaixo do menu e caber inteiro na tela.
+function scrollAbaixoDoHeader(el) {
+  if (!el) return;
+  const header = document.querySelector('.header');
+  const offset = (header ? header.offsetHeight : 0) + 12;
+  const y = el.getBoundingClientRect().top + window.scrollY - offset;
+  window.scrollTo({ top: Math.max(0, y), behavior: 'smooth' });
 }
 
 function renderRifaGrid() {
@@ -1106,6 +1136,16 @@ async function loadContent() {
 // ---- Assistente Aninha ----
 let VIVA_HISTORY = [];
 
+// Leva a pessoa da conversa direto pra grade de números da rifa.
+function abrirRifaParaCompra() {
+  const rifa = RIFAS_ATIVAS[0];
+  if (!rifa) return;
+  const expandido = document.getElementById('rifaExpandido');
+  const jaAberto = expandido && expandido.dataset.aberto === '1' && CURRENT_RIFA && CURRENT_RIFA.id === rifa.id;
+  if (jaAberto) scrollAbaixoDoHeader(expandido);
+  else toggleRifaExpandida(rifa.id);
+}
+
 function setupVivaChat() {
   const widget = document.getElementById('vivaWidget');
   const button = document.getElementById('vivaButton');
@@ -1115,11 +1155,40 @@ function setupVivaChat() {
   const messages = document.getElementById('vivaMessages');
   if (!widget || !button || !form) return;
 
+  // Deixa link (site/WhatsApp) clicável e **negrito** de verdade nas respostas da Aninha.
+  function formatarResposta(texto) {
+    return escapeHtml(texto)
+      .replace(/(https?:\/\/[^\s<]+[^\s<.,;:!?)])/g, '<a href="$1" target="_blank" rel="noopener">$1</a>')
+      .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+  }
+
+  // A Aninha marca [ABRIR_RIFA] quando está guiando a pessoa para a compra:
+  // vira um botão que leva direto para a grade de números.
+  function botaoRifa() {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'viva-action';
+    btn.textContent = '🎟️ Escolher meus números';
+    btn.addEventListener('click', () => {
+      widget.classList.remove('open');
+      abrirRifaParaCompra();
+    });
+    return btn;
+  }
+
   function addMessage(text, who) {
     const div = document.createElement('div');
     div.className = `viva-msg viva-msg-${who}`;
-    div.textContent = text;
-    messages.appendChild(div);
+    if (who === 'bot') {
+      const bruto = String(text ?? '');
+      const guiandoCompra = bruto.includes('[ABRIR_RIFA]');
+      div.innerHTML = formatarResposta(bruto.replace(/\[ABRIR_RIFA\]/g, '').trim());
+      messages.appendChild(div);
+      if (guiandoCompra && RIFAS_ATIVAS.length > 0) messages.appendChild(botaoRifa());
+    } else {
+      div.textContent = text;
+      messages.appendChild(div);
+    }
     messages.scrollTop = messages.scrollHeight;
     return div;
   }
@@ -1138,6 +1207,8 @@ function setupVivaChat() {
     widget.classList.toggle('open');
     if (widget.classList.contains('open') && !opened) {
       opened = true;
+      // O selo "1" é só o chamariz inicial: some de vez depois da primeira abertura.
+      widget.querySelector('.viva-button-badge')?.remove();
       addMessage('Oi! Eu sou a Aninha, assistente virtual do Instituto CVB 💚 Posso te ajudar a conhecer nossos projetos, como ajudar, voluntariado, a rifa solidária ou qualquer dúvida sobre o instituto. Pode perguntar!', 'bot');
       input.focus();
     }

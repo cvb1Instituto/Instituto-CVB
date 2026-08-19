@@ -304,9 +304,16 @@
       <button type="submit" aria-label="Enviar">&#10148;</button>
     </form>
   </div>
-  <button class="viva-button" id="vivaButton" type="button">
+  <button class="viva-button" id="vivaButton" type="button" aria-label="Fale com a Aninha">
+    <span class="viva-button-texto">
+      <span class="viva-button-linha1">Dúvidas?</span>
+      <span class="viva-button-linha2">Fale com a Aninha.</span>
+    </span>
     <img src="viva-avatar.png" alt="Aninha" class="viva-avatar-btn">
-    <span>Fale com a Aninha</span>
+    <span class="viva-button-badge" aria-hidden="true">
+      <svg viewBox="0 0 24 24" width="15" height="15" fill="currentColor"><circle cx="6" cy="12" r="2"></circle><circle cx="12" cy="12" r="2"></circle><circle cx="18" cy="12" r="2"></circle></svg>
+      <i>1</i>
+    </span>
   </button>
 </div>
 
