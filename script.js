@@ -18,7 +18,7 @@ let CONTATO_INFO = {};
 //   'manual'     → sem API: o site reserva o número e mostra a chave Pix; a pessoa
 //                  manda o comprovante no WhatsApp e o admin confirma no painel.
 // Os quatro caminhos estão implementados — trocar de um para outro é só mudar aqui.
-const MODO_PAGAMENTO_RIFA = 'checkout';
+const MODO_PAGAMENTO_RIFA = 'automatico';
 
 // Tempo que um número fica reservado esperando o pagamento.
 const MINUTOS_DE_RESERVA = 10;
@@ -1052,7 +1052,9 @@ async function iniciarPagamentoPix(container, payload, onAprovado) {
     if (statusData.status === 'aprovado') {
       stopPixPolling();
       const boxEl = document.getElementById('pixBox');
-      if (boxEl) boxEl.innerHTML = `<p style="text-align:center; color:var(--green); font-weight:700;">✅ Pagamento confirmado! Muito obrigado.</p>`;
+      if (boxEl) boxEl.remove();
+      // Troca o QR pelo comprovante, na mesma tela, sem a pessoa precisar sair.
+      mostrarComprovante(container, statusData);
       if (onAprovado) onAprovado();
     } else if (statusData.status === 'expirado' || statusData.status === 'cancelado') {
       stopPixPolling();
@@ -1090,7 +1092,7 @@ function openRifaMultiModal() {
       <div class="rifa-form">
         <div class="admin-field"><label>Seu nome</label><input id="rifaNome" required></div>
         <div class="admin-field"><label>WhatsApp</label><input id="rifaTelefone" required placeholder="(27) 9####-####"></div>
-        ${MODO_PAGAMENTO_RIFA === 'automatico' ? '<div class="admin-field"><label>E-mail</label><input id="rifaEmail" type="email" required></div>' : ''}
+        
         <div id="rifaFormFeedback"></div>
         <button class="btn btn-primary" id="rifaReservarBtn">${rotuloBotaoPagamento(true)}</button>
       </div>
@@ -1105,8 +1107,8 @@ function openRifaMultiModal() {
     const emailEl = document.getElementById('rifaEmail');
     const email = emailEl ? emailEl.value.trim() : '';
     const feedback = document.getElementById('rifaFormFeedback');
-    if (!nome || !telefone || (MODO_PAGAMENTO_RIFA === 'automatico' && !email)) {
-      feedback.innerHTML = `<div class="admin-error">Preencha ${MODO_PAGAMENTO_RIFA === 'automatico' ? 'nome, WhatsApp e e-mail' : 'nome e WhatsApp'}.</div>`;
+    if (!nome || !telefone) {
+      feedback.innerHTML = `<div class="admin-error">Preencha nome e WhatsApp.</div>`;
       return;
     }
     document.getElementById('rifaReservarBtn').disabled = true;
