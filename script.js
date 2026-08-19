@@ -18,7 +18,7 @@ let CONTATO_INFO = {};
 //   'manual'     → sem API: o site reserva o número e mostra a chave Pix; a pessoa
 //                  manda o comprovante no WhatsApp e o admin confirma no painel.
 // Os quatro caminhos estão implementados — trocar de um para outro é só mudar aqui.
-const MODO_PAGAMENTO_RIFA = 'checkout';
+const MODO_PAGAMENTO_RIFA = 'manual';
 
 // Tempo que um número fica reservado esperando o pagamento.
 const MINUTOS_DE_RESERVA = 10;
@@ -843,10 +843,30 @@ async function toggleRifaExpandida(rifaId) {
   // (passou dos 10 minutos), pra ninguém ver como ocupado o que já está livre.
   await supabaseClient.functions.invoke('liberar-reservas-expiradas').catch(() => {});
 
-  const { data } = await supabaseClient.from('rifa_bilhetes').select('*').eq('rifa_id', rifaId).order('numero');
-  RIFA_BILHETES = data || [];
+  RIFA_BILHETES = await carregarBilhetes(rifaId);
   renderRifaGrid();
   scrollAbaixoDoHeader(expandido);
+}
+
+// O Supabase devolve no máximo 1000 linhas por consulta, então uma rifa de 10 mil
+// números precisa ser lida em páginas — senão só apareceria até o número 1000.
+async function carregarBilhetes(rifaId) {
+  const TAMANHO = 1000;
+  let inicio = 0;
+  let todos = [];
+  while (true) {
+    const { data, error } = await supabaseClient
+      .from('rifa_bilhetes')
+      .select('id, numero, status')
+      .eq('rifa_id', rifaId)
+      .order('numero')
+      .range(inicio, inicio + TAMANHO - 1);
+    if (error || !data || data.length === 0) break;
+    todos = todos.concat(data);
+    if (data.length < TAMANHO) break;
+    inicio += TAMANHO;
+  }
+  return todos;
 }
 
 // Rola até o elemento descontando o header fixo, pra o painel aberto começar
@@ -971,8 +991,7 @@ function updateRifaSelecaoBar() {
 
 async function refreshRifaBilhetes() {
   if (!CURRENT_RIFA) return;
-  const { data } = await supabaseClient.from('rifa_bilhetes').select('*').eq('rifa_id', CURRENT_RIFA.id).order('numero');
-  RIFA_BILHETES = data || [];
+  RIFA_BILHETES = await carregarBilhetes(CURRENT_RIFA.id);
   renderRifaGrid();
 }
 

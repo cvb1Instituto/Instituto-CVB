@@ -997,12 +997,33 @@ function renderRifaEditForm(rifa, content) {
   });
 }
 
+// O Supabase devolve no máximo 1000 linhas por consulta: numa rifa de 10 mil
+// números é preciso ler em páginas, senão as contas do painel saem erradas.
+async function carregarTodosBilhetes(rifaId) {
+  const TAMANHO = 1000;
+  let inicio = 0;
+  let todos = [];
+  while (true) {
+    const { data, error } = await supabaseClient
+      .from('rifa_bilhetes')
+      .select('*')
+      .eq('rifa_id', rifaId)
+      .order('numero')
+      .range(inicio, inicio + TAMANHO - 1);
+    if (error || !data || data.length === 0) break;
+    todos = todos.concat(data);
+    if (data.length < TAMANHO) break;
+    inicio += TAMANHO;
+  }
+  return todos;
+}
+
 async function renderRifaDetail(rifa) {
   const detail = document.getElementById('rifaDetail');
   detail.innerHTML = 'Carregando...';
 
-  const [{ data: bilhetes }, { data: livres }] = await Promise.all([
-    supabaseClient.from('rifa_bilhetes').select('*').eq('rifa_id', rifa.id).order('numero'),
+  const [bilhetes, { data: livres }] = await Promise.all([
+    carregarTodosBilhetes(rifa.id),
     supabaseClient.from('rifa_contribuicoes_livres').select('*').eq('rifa_id', rifa.id).order('created_at', { ascending: false }),
   ]);
 
