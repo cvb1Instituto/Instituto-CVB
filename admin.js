@@ -966,6 +966,7 @@ async function renderRifaDetail(rifa) {
         </div>
         <div class="admin-actions">
           <button class="admin-btn-sm admin-btn-edit" data-confirm-bilhete="${b.id}">Confirmar pagamento</button>
+          <button class="admin-btn-sm admin-btn-danger" data-liberar-bilhete="${b.id}">Liberar número</button>
         </div>
       </div>
     `).join('')}
@@ -995,6 +996,18 @@ async function renderRifaDetail(rifa) {
       const { error } = await supabaseClient.from('rifa_bilhetes').update({
         status: 'pago', confirmado_por: session.user.id, confirmado_em: new Date().toISOString(),
       }).eq('id', btn.dataset.confirmBilhete);
+      if (!error) renderRifaDetail(rifa);
+    });
+  });
+
+  // Reserva sem pagamento (a pessoa desistiu ou o comprovante nunca chegou):
+  // devolve o número para a grade pública.
+  detail.querySelectorAll('[data-liberar-bilhete]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      if (!confirm('Liberar este número? Ele volta a ficar disponível para outra pessoa.')) return;
+      const { error } = await supabaseClient.from('rifa_bilhetes').update({
+        status: 'disponivel', comprador_nome: null, comprador_telefone: null, reservado_em: null,
+      }).eq('id', btn.dataset.liberarBilhete);
       if (!error) renderRifaDetail(rifa);
     });
   });

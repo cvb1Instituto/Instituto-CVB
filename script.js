@@ -8,6 +8,22 @@
 
 let EVENTOS = [];
 let PIX_INFO = {};
+let CONTATO_INFO = {};
+
+// Como a rifa e as vaquinhas são pagas:
+//   'manual'     → o site reserva os números e mostra a chave Pix do instituto; a
+//                  pessoa manda o comprovante no WhatsApp e o admin confirma no
+//                  painel. É o modo em uso, porque não depende de API nenhuma.
+//   'checkout'   → leva a pessoa para a página de pagamento do Mercado Pago
+//                  (Pix, cartão ou boleto), com confirmação automática pelo
+//                  webhook. Pronto e testado (create-checkout-preference), mas o
+//                  Mercado Pago passou a recusar também a criação de preferência
+//                  com 403 PolicyAgent enquanto o cadastro da conta não é validado.
+//   'automatico' → Pix transparente, com QR e copia e cola dentro do site. Mesmo
+//                  bloqueio, na API /v1/payments.
+// Os três caminhos estão implementados: quando o Mercado Pago liberar a conta,
+// trocar para 'checkout' (ou 'automatico') é a única mudança necessária.
+const MODO_PAGAMENTO_RIFA = 'manual';
 let CURRENT_RIFA = null;
 let RIFA_BILHETES = [];
 let RIFA_SELECIONADOS = [];
@@ -956,18 +972,24 @@ function openRifaMultiModal() {
   const plural = bilhetes.length > 1;
   const rifaIdAtual = CURRENT_RIFA.id;
 
+  const manual = MODO_PAGAMENTO_RIFA === 'manual';
+
   const content = document.getElementById('rifaModalContent');
   content.innerHTML = `
     <div style="padding:28px;">
       <h2>${bilhetes.length} número${plural ? 's' : ''} selecionado${plural ? 's' : ''}</h2>
       <p>Números: <strong>${numerosStr}</strong></p>
-      <p>Preencha seus dados para pagar ${formatBRL(total)} via Pix.</p>
+      <p>${manual
+        ? `Preencha seus dados para reservar ${plural ? 'os números' : 'o número'} e pagar ${formatBRL(total)} via Pix.`
+        : MODO_PAGAMENTO_RIFA === 'checkout'
+          ? `Preencha seus dados para pagar ${formatBRL(total)} com Pix, cartão ou boleto.`
+          : `Preencha seus dados para pagar ${formatBRL(total)} via Pix.`}</p>
       <div class="rifa-form">
         <div class="admin-field"><label>Seu nome</label><input id="rifaNome" required></div>
         <div class="admin-field"><label>WhatsApp</label><input id="rifaTelefone" required placeholder="(27) 9####-####"></div>
-        <div class="admin-field"><label>E-mail</label><input id="rifaEmail" type="email" required></div>
+        ${manual ? '' : '<div class="admin-field"><label>E-mail</label><input id="rifaEmail" type="email" required></div>'}
         <div id="rifaFormFeedback"></div>
-        <button class="btn btn-primary" id="rifaReservarBtn">Gerar Pix</button>
+        <button class="btn btn-primary" id="rifaReservarBtn">${rotuloBotaoPagamento(true)}</button>
       </div>
     </div>
   `;
@@ -977,14 +999,27 @@ function openRifaMultiModal() {
   document.getElementById('rifaReservarBtn').addEventListener('click', async () => {
     const nome = document.getElementById('rifaNome').value.trim();
     const telefone = document.getElementById('rifaTelefone').value.trim();
-    const email = document.getElementById('rifaEmail').value.trim();
+    const emailEl = document.getElementById('rifaEmail');
+    const email = emailEl ? emailEl.value.trim() : '';
     const feedback = document.getElementById('rifaFormFeedback');
-    if (!nome || !telefone || !email) {
-      feedback.innerHTML = `<div class="admin-error">Preencha nome, WhatsApp e e-mail.</div>`;
+    if (!nome || !telefone || (!manual && !email)) {
+      feedback.innerHTML = `<div class="admin-error">Preencha ${manual ? 'nome e WhatsApp' : 'nome, WhatsApp e e-mail'}.</div>`;
       return;
     }
     document.getElementById('rifaReservarBtn').disabled = true;
     feedback.innerHTML = '';
+
+    if (manual) {
+      await reservarNumerosManual(content, { bilhetes, nome, telefone });
+      return;
+    }
+
+    if (MODO_PAGAMENTO_RIFA === 'checkout') {
+      await iniciarCheckoutPro(content, {
+        tipo: 'rifa_numero', rifa_id: rifaIdAtual, numeros: numerosArr, nome, telefone, email,
+      });
+      return;
+    }
 
     await iniciarPagamentoPix(content, {
       tipo: 'rifa_numero', rifa_id: rifaIdAtual, numeros: numerosArr, nome, telefone, email,
@@ -995,7 +1030,143 @@ function openRifaMultiModal() {
   });
 }
 
+// ---- Checkout Pro (página de pagamento do Mercado Pago) ----
+
+// Rótulo do botão que fecha o pedido, conforme o modo de pagamento.
+function rotuloBotaoPagamento(comNumeros) {
+  if (MODO_PAGAMENTO_RIFA === 'manual') return comNumeros ? 'Reservar meus números' : 'Continuar para o Pix';
+  if (MODO_PAGAMENTO_RIFA === 'checkout') return 'Ir para o pagamento';
+  return 'Gerar Pix';
+}
+
+async function iniciarCheckoutPro(container, payload) {
+  const aviso = document.createElement('p');
+  aviso.className = 'admin-hint';
+  aviso.textContent = 'Abrindo o pagamento seguro do Mercado Pago...';
+  container.appendChild(aviso);
+
+  const { data, error } = await supabaseClient.functions.invoke('create-checkout-preference', { body: payload });
+  aviso.remove();
+
+  if (!error && data && data.init_point) {
+    window.location.href = data.init_point;
+    return;
+  }
+
+  // A mensagem específica (ex.: número já reservado) vem no corpo da resposta,
+  // que o supabase-js entrega dentro de error.context quando o status não é 2xx.
+  let msg = 'Não foi possível abrir o pagamento. Tente novamente.';
+  if (data && data.error) {
+    msg = data.error;
+  } else if (error && error.context && typeof error.context.json === 'function') {
+    try {
+      const corpo = await error.context.json();
+      if (corpo && corpo.error) msg = corpo.error;
+    } catch (e) { /* resposta sem json: fica a mensagem genérica */ }
+  }
+
+  const err = document.createElement('div');
+  err.className = 'admin-error';
+  err.textContent = msg;
+  container.appendChild(err);
+  container.querySelectorAll('button[disabled]').forEach(b => { b.disabled = false; });
+  refreshRifaBilhetes();
+}
+
+// ---- Pix manual (plano B, sem API) ----
+
+// Reserva os números direto na tabela (a política de RLS deixa o visitante
+// marcar como "reservado" só o que estiver disponível — é isso que impede duas
+// pessoas de levarem o mesmo número). Se alguém pegar um número no meio do
+// caminho, seguimos com os que sobraram em vez de perder a venda inteira.
+async function reservarNumerosManual(container, { bilhetes, nome, telefone }) {
+  const ids = bilhetes.map(b => b.id);
+  const { data: reservados, error } = await supabaseClient
+    .from('rifa_bilhetes')
+    .update({
+      status: 'reservado',
+      reservado_em: new Date().toISOString(),
+      comprador_nome: nome,
+      comprador_telefone: telefone,
+    })
+    .in('id', ids)
+    .eq('status', 'disponivel')
+    .select('numero');
+
+  if (error || !reservados || reservados.length === 0) {
+    const feedback = document.getElementById('rifaFormFeedback');
+    if (feedback) {
+      feedback.innerHTML = `<div class="admin-error">Esses números acabaram de ser reservados por outra pessoa. Feche e escolha outros.</div>`;
+    }
+    const btn = document.getElementById('rifaReservarBtn');
+    if (btn) btn.disabled = false;
+    RIFA_SELECIONADOS = [];
+    refreshRifaBilhetes();
+    return;
+  }
+
+  const numerosOk = reservados.map(r => String(r.numero).padStart(3, '0')).sort();
+  const perdidos = ids.length - reservados.length;
+  const valor = reservados.length * Number(CURRENT_RIFA.preco_numero);
+
+  RIFA_SELECIONADOS = [];
+  refreshRifaBilhetes();
+
+  container.innerHTML = `
+    <div style="padding:28px;">
+      <h2>✅ Número${numerosOk.length > 1 ? 's' : ''} reservado${numerosOk.length > 1 ? 's' : ''} no seu nome</h2>
+      ${perdidos > 0 ? `<div class="admin-error">${perdidos} do${perdidos > 1 ? 's' : ''} número${perdidos > 1 ? 's' : ''} escolhido${perdidos > 1 ? 's' : ''} acabou de ser pego por outra pessoa. Reservamos os demais.</div>` : ''}
+      <p>Número${numerosOk.length > 1 ? 's' : ''}: <strong>${numerosOk.join(', ')}</strong></p>
+      ${boxPixManualHtml({ valor, nome, numeros: numerosOk.join(', ') })}
+    </div>
+  `;
+  ativarBotoesPixManual({ valor, nome, numeros: numerosOk.join(', ') });
+}
+
+function boxPixManualHtml({ valor, numeros }) {
+  const chave = PIX_INFO.chave || '';
+  const tipoChave = PIX_INFO.tipo || 'Chave Pix';
+  const beneficiario = PIX_INFO.nome_beneficiario || 'Instituto CVB';
+  return `
+    <div class="rifa-pix-box">
+      <p style="text-align:center; margin-bottom:14px;"><strong>Pague ${formatBRL(valor)} via Pix</strong></p>
+      <p style="font-size:13px; color:var(--gray); margin-bottom:6px;">${escapeHtml(tipoChave)} — ${escapeHtml(beneficiario)}</p>
+      <p class="chave" id="pixChaveManual">${escapeHtml(chave)}</p>
+      <button class="btn btn-outline" id="pixCopiarChaveBtn" type="button" style="margin-top:12px;width:100%;">Copiar chave Pix</button>
+      <p style="font-size:13.5px; color:var(--gray); margin-top:16px;">
+        Depois de pagar, <strong>envie o comprovante no WhatsApp</strong> para confirmarmos${numeros ? ' o seu número' : ' a sua contribuição'}.
+        A reserva vale 30 minutos; assim que confirmarmos, o número passa a ser seu de vez.
+      </p>
+      <a class="btn btn-primary" id="pixWhatsBtn" href="#" target="_blank" rel="noopener" style="margin-top:12px;width:100%;text-align:center;">Enviar comprovante no WhatsApp</a>
+    </div>
+  `;
+}
+
+function ativarBotoesPixManual({ valor, nome, numeros }) {
+  const chave = PIX_INFO.chave || '';
+  const copiar = document.getElementById('pixCopiarChaveBtn');
+  if (copiar) {
+    copiar.addEventListener('click', async () => {
+      try {
+        await navigator.clipboard.writeText(chave);
+        copiar.textContent = 'Copiado!';
+        setTimeout(() => { copiar.textContent = 'Copiar chave Pix'; }, 2000);
+      } catch (e) { /* sem clipboard: a pessoa copia manualmente */ }
+    });
+  }
+
+  const whats = document.getElementById('pixWhatsBtn');
+  if (whats) {
+    const numero = (CONTATO_INFO.whatsapp || '5527981067522');
+    const texto = numeros
+      ? `Olá! Sou ${nome}. Reservei o(s) número(s) ${numeros} da rifa do Instituto CVB (total ${formatBRL(valor)}) e estou enviando o comprovante do Pix.`
+      : `Olá! Sou ${nome}. Contribuí com ${formatBRL(valor)} para a rifa do Instituto CVB e estou enviando o comprovante do Pix.`;
+    whats.href = `https://wa.me/${numero}?text=${encodeURIComponent(texto)}`;
+  }
+}
+
 function openRifaLivreModal() {
+  const manual = MODO_PAGAMENTO_RIFA === 'manual';
   const content = document.getElementById('rifaModalContent');
   const rifaIdAtual = CURRENT_RIFA.id;
   content.innerHTML = `
@@ -1005,10 +1176,10 @@ function openRifaLivreModal() {
       <div class="rifa-form">
         <div class="admin-field"><label>Seu nome</label><input id="rifaLivreNome" required></div>
         <div class="admin-field"><label>WhatsApp</label><input id="rifaLivreTelefone" required placeholder="(27) 9####-####"></div>
-        <div class="admin-field"><label>E-mail</label><input id="rifaLivreEmail" type="email" required></div>
+        ${manual ? '' : '<div class="admin-field"><label>E-mail</label><input id="rifaLivreEmail" type="email" required></div>'}
         <div class="admin-field"><label>Valor (R$)</label><input id="rifaLivreValor" type="number" min="1" step="0.01" required></div>
         <div id="rifaLivreFeedback"></div>
-        <button class="btn btn-primary" id="rifaLivreSubmitBtn">Gerar Pix</button>
+        <button class="btn btn-primary" id="rifaLivreSubmitBtn">${rotuloBotaoPagamento(false)}</button>
       </div>
     </div>
   `;
@@ -1018,15 +1189,44 @@ function openRifaLivreModal() {
   document.getElementById('rifaLivreSubmitBtn').addEventListener('click', async () => {
     const nome = document.getElementById('rifaLivreNome').value.trim();
     const telefone = document.getElementById('rifaLivreTelefone').value.trim();
-    const email = document.getElementById('rifaLivreEmail').value.trim();
+    const emailEl = document.getElementById('rifaLivreEmail');
+    const email = emailEl ? emailEl.value.trim() : '';
     const valor = Number(document.getElementById('rifaLivreValor').value);
     const feedback = document.getElementById('rifaLivreFeedback');
-    if (!nome || !telefone || !email || !valor || valor <= 0) {
+    if (!nome || !telefone || (!manual && !email) || !valor || valor <= 0) {
       feedback.innerHTML = `<div class="admin-error">Preencha todos os campos com um valor válido.</div>`;
       return;
     }
     document.getElementById('rifaLivreSubmitBtn').disabled = true;
     feedback.innerHTML = '';
+
+    if (manual) {
+      // Fica registrada como contribuição pendente — o admin confirma quando o
+      // comprovante chegar ("Doações livres aguardando confirmação" no painel).
+      const { error } = await supabaseClient.from('rifa_contribuicoes_livres').insert({
+        rifa_id: rifaIdAtual, nome, telefone, valor, status: 'pendente',
+      });
+      if (error) {
+        feedback.innerHTML = `<div class="admin-error">Não foi possível registrar agora. Tente novamente.</div>`;
+        document.getElementById('rifaLivreSubmitBtn').disabled = false;
+        return;
+      }
+      content.innerHTML = `
+        <div style="padding:28px;">
+          <h2>Falta só o Pix 💚</h2>
+          <p>Obrigado, ${escapeHtml(nome)}! Sua contribuição foi registrada.</p>
+          ${boxPixManualHtml({ valor, numeros: '' })}
+        </div>
+      `;
+      ativarBotoesPixManual({ valor, nome, numeros: '' });
+      return;
+    }
+
+    if (MODO_PAGAMENTO_RIFA === 'checkout') {
+      await iniciarCheckoutPro(content, { tipo: 'rifa_livre', rifa_id: rifaIdAtual, valor, nome, telefone, email });
+      return;
+    }
+
     await iniciarPagamentoPix(content, { tipo: 'rifa_livre', rifa_id: rifaIdAtual, valor, nome, telefone, email }, null);
   });
 }
@@ -1038,14 +1238,14 @@ function openCampanhaModal(id) {
   content.innerHTML = `
     <div style="padding:28px;">
       <h2>Ajudar — ${escapeHtml(c.titulo)}</h2>
-      <p>Contribua com qualquer valor via Pix.</p>
+      <p>Contribua com qualquer valor ${MODO_PAGAMENTO_RIFA === 'checkout' ? 'via Pix, cartão ou boleto' : 'via Pix'}.</p>
       <div class="rifa-form">
         <div class="admin-field"><label>Seu nome</label><input id="campNome" required></div>
         <div class="admin-field"><label>WhatsApp</label><input id="campTelefone" required placeholder="(27) 9####-####"></div>
-        <div class="admin-field"><label>E-mail</label><input id="campEmail" type="email" required></div>
+        ${MODO_PAGAMENTO_RIFA === 'manual' ? '' : '<div class="admin-field"><label>E-mail</label><input id="campEmail" type="email" required></div>'}
         <div class="admin-field"><label>Valor (R$)</label><input id="campValor" type="number" min="1" step="0.01" required></div>
         <div id="campFeedback"></div>
-        <button class="btn btn-primary" id="campSubmitBtn">Gerar Pix</button>
+        <button class="btn btn-primary" id="campSubmitBtn">${rotuloBotaoPagamento(false)}</button>
       </div>
     </div>
   `;
@@ -1053,17 +1253,37 @@ function openCampanhaModal(id) {
   document.body.style.overflow = 'hidden';
 
   document.getElementById('campSubmitBtn').addEventListener('click', async () => {
+    const manual = MODO_PAGAMENTO_RIFA === 'manual';
     const nome = document.getElementById('campNome').value.trim();
     const telefone = document.getElementById('campTelefone').value.trim();
-    const email = document.getElementById('campEmail').value.trim();
+    const emailEl = document.getElementById('campEmail');
+    const email = emailEl ? emailEl.value.trim() : '';
     const valor = Number(document.getElementById('campValor').value);
     const feedback = document.getElementById('campFeedback');
-    if (!nome || !telefone || !email || !valor || valor <= 0) {
+    if (!nome || !telefone || (!manual && !email) || !valor || valor <= 0) {
       feedback.innerHTML = `<div class="admin-error">Preencha todos os campos com um valor válido.</div>`;
       return;
     }
     document.getElementById('campSubmitBtn').disabled = true;
     feedback.innerHTML = '';
+
+    if (manual) {
+      content.innerHTML = `
+        <div style="padding:28px;">
+          <h2>Falta só o Pix 💚</h2>
+          <p>Obrigado, ${escapeHtml(nome)}! Sua contribuição para <strong>${escapeHtml(c.titulo)}</strong> é de ${formatBRL(valor)}.</p>
+          ${boxPixManualHtml({ valor, numeros: '' })}
+        </div>
+      `;
+      ativarBotoesPixManual({ valor, nome, numeros: '' });
+      return;
+    }
+
+    if (MODO_PAGAMENTO_RIFA === 'checkout') {
+      await iniciarCheckoutPro(content, { tipo: 'campanha', campanha_id: c.id, valor, nome, telefone, email });
+      return;
+    }
+
     await iniciarPagamentoPix(content, { tipo: 'campanha', campanha_id: c.id, valor, nome, telefone, email }, null);
   });
 }
@@ -1110,6 +1330,7 @@ async function loadContent() {
   const blocks = {};
   (blocksRows || []).forEach(row => { blocks[row.key] = row.value; });
   PIX_INFO = blocks.pix || {};
+  CONTATO_INFO = blocks.contato || {};
 
   renderHero(blocks.hero);
   renderStats(blocks.stats);
