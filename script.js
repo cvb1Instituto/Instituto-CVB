@@ -23,7 +23,7 @@ let CONTATO_INFO = {};
 //                  bloqueio, na API /v1/payments.
 // Os três caminhos estão implementados: quando o Mercado Pago liberar a conta,
 // trocar para 'checkout' (ou 'automatico') é a única mudança necessária.
-const MODO_PAGAMENTO_RIFA = 'manual';
+const MODO_PAGAMENTO_RIFA = 'checkout';
 let CURRENT_RIFA = null;
 let RIFA_BILHETES = [];
 let RIFA_SELECIONADOS = [];
@@ -1288,6 +1288,38 @@ function openCampanhaModal(id) {
   });
 }
 
+// Quem volta do checkout do Mercado Pago chega com o resultado na URL
+// (status=approved / pending / failure). Sem isso a pessoa pagava e voltava
+// pra home sem nenhum sinal de que deu certo.
+function mostrarRetornoDoPagamento() {
+  const params = new URLSearchParams(window.location.search);
+  const status = params.get('status') || params.get('collection_status');
+  if (!status) return;
+
+  const content = document.getElementById('rifaContent');
+  if (!content) return;
+
+  const avisos = {
+    approved: { cor: 'var(--green)', texto: '✅ Pagamento confirmado! Seu número já está reservado no seu nome. Obrigado por ajudar 💚' },
+    pending: { cor: 'var(--yellow-dark)', texto: '⏳ Pagamento em processamento. Assim que for aprovado, seu número é confirmado automaticamente.' },
+    in_process: { cor: 'var(--yellow-dark)', texto: '⏳ Pagamento em processamento. Assim que for aprovado, seu número é confirmado automaticamente.' },
+    failure: { cor: '#b3261e', texto: '⚠️ O pagamento não foi concluído. Você pode escolher seus números de novo abaixo.' },
+    rejected: { cor: '#b3261e', texto: '⚠️ O pagamento não foi concluído. Você pode escolher seus números de novo abaixo.' },
+  };
+  const aviso = avisos[status];
+  if (!aviso) return;
+
+  const box = document.createElement('div');
+  box.className = 'rifa-retorno-pagamento';
+  box.style.borderColor = aviso.cor;
+  box.innerHTML = `<strong style="color:${aviso.cor}">${escapeHtml(aviso.texto)}</strong>`;
+  content.prepend(box);
+
+  // Limpa a query pra não repetir o aviso se a pessoa recarregar a página.
+  window.history.replaceState({}, '', window.location.pathname + window.location.hash);
+  scrollAbaixoDoHeader(box);
+}
+
 function setupRifaModal() {
   document.getElementById('rifaModalClose')?.addEventListener('click', closeRifaModal);
   document.getElementById('rifaModal')?.addEventListener('click', (e) => {
@@ -1478,6 +1510,7 @@ setupRifaModal();
 setupVivaChat();
 loadContent().then(() => {
   if (PENDING_LANG) applyTranslation(PENDING_LANG);
+  mostrarRetornoDoPagamento();
   if (window.location.hash) {
     const alvo = document.querySelector(window.location.hash);
     if (alvo) setTimeout(() => alvo.scrollIntoView({ block: 'start' }), 50);

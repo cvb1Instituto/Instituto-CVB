@@ -527,6 +527,11 @@ button.partner-box:hover { box-shadow: var(--shadow-md); transform: translateY(-
   .rifa-desc-clamp { -webkit-line-clamp: 7; }
 }
 
+.rifa-retorno-pagamento {
+  background: var(--white); border: 2px solid var(--green); border-radius: var(--radius);
+  padding: 16px 20px; margin-bottom: 22px; font-size: 15px; box-shadow: var(--shadow-sm);
+}
+
 .rifa-numeros-wrap {
   margin-top: 32px; background: var(--white); border-radius: var(--radius);
   padding: 22px 24px 20px; box-shadow: var(--shadow-sm); border: 1px solid rgba(31,36,48,0.06);
