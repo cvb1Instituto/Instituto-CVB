@@ -552,6 +552,24 @@ button.partner-box:hover { box-shadow: var(--shadow-md); transform: translateY(-
 }
 .rifa-numero.destacado { box-shadow: 0 0 0 3px var(--yellow); }
 
+/* Comprovante mostrado ao voltar do pagamento. */
+.rifa-comprovante {
+  background: var(--white); border: 2px solid var(--green); border-radius: var(--radius);
+  padding: 24px 28px; margin-bottom: 24px; box-shadow: var(--shadow-sm);
+}
+.rifa-comprovante h3 { color: var(--green); font-size: 20px; margin-bottom: 4px; }
+.rifa-comprovante-sub { font-size: 13.5px; color: var(--gray); margin-bottom: 16px; }
+.rifa-comprovante table { border-collapse: collapse; width: 100%; max-width: 520px; font-size: 14.5px; }
+.rifa-comprovante td { padding: 8px 10px; border-bottom: 1px solid rgba(31,36,48,0.08); }
+.rifa-comprovante td:first-child { color: var(--gray); width: 190px; }
+.rifa-comprovante-nota { font-size: 13.5px; color: var(--gray); margin: 16px 0 14px; }
+@media print {
+  body > *:not(main) { display: none !important; }
+  main > section:not(#rifa) { display: none !important; }
+  #rifa .rifas-grid, #rifa .section-header, #rifaExpandido, #imprimirComprovanteBtn { display: none !important; }
+  .rifa-comprovante { border-color: #333; box-shadow: none; }
+}
+
 .rifa-retorno-pagamento {
   background: var(--white); border: 2px solid var(--green); border-radius: var(--radius);
   padding: 16px 20px; margin-bottom: 22px; font-size: 15px; box-shadow: var(--shadow-sm);

@@ -18,7 +18,7 @@ let CONTATO_INFO = {};
 //   'manual'     → sem API: o site reserva o número e mostra a chave Pix; a pessoa
 //                  manda o comprovante no WhatsApp e o admin confirma no painel.
 // Os quatro caminhos estão implementados — trocar de um para outro é só mudar aqui.
-const MODO_PAGAMENTO_RIFA = 'manual';
+const MODO_PAGAMENTO_RIFA = 'checkout';
 
 // Tempo que um número fica reservado esperando o pagamento.
 const MINUTOS_DE_RESERVA = 10;
@@ -804,6 +804,7 @@ async function toggleRifaExpandida(rifaId) {
     expandido.innerHTML = '';
     expandido.dataset.aberto = '0';
     CURRENT_RIFA = null;
+    pararAtualizacaoDaGrade();
     return;
   }
 
@@ -845,6 +846,7 @@ async function toggleRifaExpandida(rifaId) {
 
   RIFA_BILHETES = await carregarBilhetes(rifaId);
   renderRifaGrid();
+  iniciarAtualizacaoDaGrade();
   scrollAbaixoDoHeader(expandido);
 }
 
@@ -1150,6 +1152,9 @@ async function iniciarCheckoutPro(container, payload) {
   aviso.remove();
 
   if (!error && data && data.init_point) {
+    // Guarda a referência: se o Mercado Pago devolver a pessoa sem os parâmetros
+    // na URL, ainda dá pra conferir o pagamento na volta.
+    try { localStorage.setItem('cvb_pagamento_pendente', data.pagamento_id); } catch (e) {}
     window.location.href = data.init_point;
     return;
   }
@@ -1477,13 +1482,41 @@ function openCampanhaModal(id) {
 // Quem volta do checkout do Mercado Pago chega com o resultado na URL
 // (status=approved / pending / failure). Sem isso a pessoa pagava e voltava
 // pra home sem nenhum sinal de que deu certo.
-function mostrarRetornoDoPagamento() {
+async function mostrarRetornoDoPagamento() {
   const params = new URLSearchParams(window.location.search);
-  const status = params.get('status') || params.get('collection_status');
-  if (!status) return;
+  let status = params.get('status') || params.get('collection_status');
+  let referencia = params.get('external_reference');
+  try { referencia = referencia || localStorage.getItem('cvb_pagamento_pendente'); } catch (e) {}
+  if (!status && !referencia) return;
 
   const content = document.getElementById('rifaContent');
   if (!content) return;
+
+  // Não espera o webhook do Mercado Pago: pergunta direto se o pagamento saiu e
+  // confirma o número na hora.
+  let pagamento = null;
+  if (referencia) {
+    // O Pix pode levar alguns segundos para o Mercado Pago acusar: tenta algumas
+    // vezes antes de desistir, em vez de dizer "não concluído" cedo demais.
+    for (let tentativa = 0; tentativa < 6; tentativa++) {
+      try {
+        const { data } = await supabaseClient.functions.invoke('check-pix-status', { body: { pagamento_id: referencia } });
+        pagamento = data || null;
+        if (data && data.status === 'aprovado') { status = 'approved'; break; }
+        if (data && ['cancelado', 'expirado'].includes(data.status)) { status = 'failure'; break; }
+        if (data && data.status === 'pendente') status = 'pending';
+      } catch (e) { /* sem resposta: vale o status que veio na URL */ }
+      await new Promise(r => setTimeout(r, 2500));
+    }
+    try { localStorage.removeItem('cvb_pagamento_pendente'); } catch (e) {}
+    if (status === 'approved') refreshRifaBilhetes();
+  }
+  if (!status) return;
+
+  if (status === 'approved' && pagamento) {
+    mostrarComprovante(content, pagamento);
+    return;
+  }
 
   const avisos = {
     approved: { cor: 'var(--green)', texto: '✅ Pagamento confirmado! Seu número já está reservado no seu nome. Obrigado por ajudar 💚' },
@@ -1504,6 +1537,57 @@ function mostrarRetornoDoPagamento() {
   // Limpa a query pra não repetir o aviso se a pessoa recarregar a página.
   window.history.replaceState({}, '', window.location.pathname + window.location.hash);
   scrollAbaixoDoHeader(box);
+}
+
+// Comprovante da compra: fica na tela e dá para imprimir ou salvar em PDF.
+function mostrarComprovante(content, pagamento) {
+  const numeros = Array.isArray(pagamento.numeros) && pagamento.numeros.length
+    ? pagamento.numeros.map(n => String(n).padStart(digitosDoNumero(), '0')).join(', ')
+    : null;
+  const quando = pagamento.pago_em ? new Date(pagamento.pago_em).toLocaleString('pt-BR') : new Date().toLocaleString('pt-BR');
+
+  const box = document.createElement('div');
+  box.className = 'rifa-comprovante';
+  box.id = 'rifaComprovante';
+  box.innerHTML = `
+    <h3>✅ Pagamento confirmado</h3>
+    <p class="rifa-comprovante-sub">Comprovante da sua participação na rifa do Instituto CVB</p>
+    <table>
+      ${numeros ? `<tr><td>Número${pagamento.numeros.length > 1 ? 's' : ''}</td><td><strong>${escapeHtml(numeros)}</strong></td></tr>` : ''}
+      <tr><td>Nome</td><td>${escapeHtml(pagamento.nome || '')}</td></tr>
+      <tr><td>WhatsApp</td><td>${escapeHtml(pagamento.telefone || '')}</td></tr>
+      <tr><td>Valor pago</td><td><strong>${formatBRL(pagamento.valor)}</strong></td></tr>
+      <tr><td>Data</td><td>${escapeHtml(quando)}</td></tr>
+      ${pagamento.comprovante ? `<tr><td>Código do pagamento</td><td>${escapeHtml(pagamento.comprovante)}</td></tr>` : ''}
+    </table>
+    <p class="rifa-comprovante-nota">Guarde este comprovante. ${numeros ? 'Seu número já está confirmado no seu nome e não pode mais ser comprado por outra pessoa.' : 'Sua contribuição foi registrada.'}</p>
+    <button class="btn btn-outline" id="imprimirComprovanteBtn" type="button">Imprimir / salvar em PDF</button>
+  `;
+  content.prepend(box);
+  document.getElementById('imprimirComprovanteBtn').addEventListener('click', () => window.print());
+
+  window.history.replaceState({}, '', window.location.pathname + window.location.hash);
+  scrollAbaixoDoHeader(box);
+}
+
+// Enquanto a grade está aberta, confere de tempos em tempos o que mudou: número
+// pago por outra pessoa fica cinza sem precisar recarregar a página.
+let RIFA_ATUALIZACAO = null;
+
+function iniciarAtualizacaoDaGrade() {
+  pararAtualizacaoDaGrade();
+  RIFA_ATUALIZACAO = setInterval(() => {
+    if (!CURRENT_RIFA || !document.getElementById('rifaNumerosGrid')) {
+      pararAtualizacaoDaGrade();
+      return;
+    }
+    if (document.hidden) return;
+    refreshRifaBilhetes();
+  }, 15000);
+}
+
+function pararAtualizacaoDaGrade() {
+  if (RIFA_ATUALIZACAO) { clearInterval(RIFA_ATUALIZACAO); RIFA_ATUALIZACAO = null; }
 }
 
 function setupRifaModal() {
