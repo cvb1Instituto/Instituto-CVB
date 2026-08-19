@@ -1485,7 +1485,7 @@ function openCampanhaModal(id) {
 async function mostrarRetornoDoPagamento() {
   const params = new URLSearchParams(window.location.search);
   let status = params.get('status') || params.get('collection_status');
-  let referencia = params.get('external_reference');
+  let referencia = params.get('external_reference') || params.get('ref');
   try { referencia = referencia || localStorage.getItem('cvb_pagamento_pendente'); } catch (e) {}
   if (!status && !referencia) return;
 
@@ -1778,11 +1778,24 @@ setupLangSwitcher();
 setupModal();
 setupRifaModal();
 setupVivaChat();
+// Link com âncora (ex.: institutocvb.com.br/#rifa): a página continua crescendo
+// depois do primeiro cálculo — imagens da galeria, banners, o card da rifa — e o
+// ponto de parada acabava caindo numa seção anterior. Por isso a rolagem se
+// repete enquanto o layout assenta.
+function irParaAncora(hash) {
+  let alvo;
+  try { alvo = document.querySelector(hash); } catch (e) { return; }
+  if (!alvo) return;
+  const ajustar = () => scrollAbaixoDoHeader(alvo);
+  ajustar();
+  [300, 900, 1800].forEach(ms => setTimeout(ajustar, ms));
+  window.addEventListener('load', () => setTimeout(ajustar, 300), { once: true });
+}
+
 loadContent().then(() => {
   if (PENDING_LANG) applyTranslation(PENDING_LANG);
   mostrarRetornoDoPagamento();
-  if (window.location.hash) {
-    const alvo = document.querySelector(window.location.hash);
-    if (alvo) setTimeout(() => alvo.scrollIntoView({ block: 'start' }), 50);
-  }
+  if (window.location.hash) irParaAncora(window.location.hash);
 });
+
+window.addEventListener('hashchange', () => irParaAncora(window.location.hash));
