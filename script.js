@@ -11,19 +11,17 @@ let PIX_INFO = {};
 let CONTATO_INFO = {};
 
 // Como a rifa e as vaquinhas são pagas:
-//   'manual'     → o site reserva os números e mostra a chave Pix do instituto; a
-//                  pessoa manda o comprovante no WhatsApp e o admin confirma no
-//                  painel. É o modo em uso, porque não depende de API nenhuma.
-//   'checkout'   → leva a pessoa para a página de pagamento do Mercado Pago
-//                  (Pix, cartão ou boleto), com confirmação automática pelo
-//                  webhook. Pronto e testado (create-checkout-preference), mas o
-//                  Mercado Pago passou a recusar também a criação de preferência
-//                  com 403 PolicyAgent enquanto o cadastro da conta não é validado.
-//   'automatico' → Pix transparente, com QR e copia e cola dentro do site. Mesmo
-//                  bloqueio, na API /v1/payments.
-// Os três caminhos estão implementados: quando o Mercado Pago liberar a conta,
-// trocar para 'checkout' (ou 'automatico') é a única mudança necessária.
+//   'checkout'   → página de pagamento do Mercado Pago (Pix, cartão ou boleto),
+//                  também com confirmação automática.
+//   'automatico' → Pix transparente do Mercado Pago. Bloqueado enquanto o cadastro
+//                  da conta não for validado (403 PolicyAgent em /v1/payments).
+//   'manual'     → sem API: o site reserva o número e mostra a chave Pix; a pessoa
+//                  manda o comprovante no WhatsApp e o admin confirma no painel.
+// Os quatro caminhos estão implementados — trocar de um para outro é só mudar aqui.
 const MODO_PAGAMENTO_RIFA = 'checkout';
+
+// Tempo que um número fica reservado esperando o pagamento.
+const MINUTOS_DE_RESERVA = 10;
 let CURRENT_RIFA = null;
 let RIFA_BILHETES = [];
 let RIFA_SELECIONADOS = [];
@@ -833,6 +831,10 @@ async function toggleRifaExpandida(rifaId) {
   `;
   document.getElementById('rifaContinuarBtn').addEventListener('click', openRifaMultiModal);
   observarReveal(expandido);
+
+  // Antes de mostrar a grade, devolve os números que alguém reservou e não pagou
+  // (mais de 30 minutos), pra ninguém ver como ocupado o que já está livre.
+  await supabaseClient.functions.invoke('liberar-reservas-expiradas').catch(() => {});
 
   const { data } = await supabaseClient.from('rifa_bilhetes').select('*').eq('rifa_id', rifaId).order('numero');
   RIFA_BILHETES = data || [];
