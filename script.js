@@ -826,8 +826,8 @@ async function toggleRifaExpandida(rifaId) {
         <input id="rifaBuscaNumero" inputmode="numeric" placeholder="Buscar um número (ex.: 1234)">
         <button class="btn btn-outline" id="rifaSorteNumeroBtn" type="button">Número da sorte</button>
       </div>
+      <div class="rifa-abas" id="rifaPaginacao"></div>
       <div class="rifa-numeros-grid" id="rifaNumerosGrid"></div>
-      <div class="rifa-paginacao" id="rifaPaginacao"></div>
       <div class="rifa-selecao-bar" id="rifaSelecaoBar" style="display:none;">
         <span id="rifaSelecaoInfo"></span>
         <button class="btn btn-primary" id="rifaContinuarBtn">Continuar</button>
@@ -859,10 +859,9 @@ function scrollAbaixoDoHeader(el) {
   window.scrollTo({ top: Math.max(0, y), behavior: 'smooth' });
 }
 
-// A grade é paginada: com 10 mil números, desenhar tudo de uma vez trava o
-// navegador (principalmente no celular). Mostramos 500 por página, com busca
-// direta pelo número e sorteio aleatório pra quem não quer procurar.
-const RIFA_POR_PAGINA = 500;
+// A grade é dividida em abas de mil números (numa rifa de 10 mil, dez abinhas):
+// desenhar tudo de uma vez travaria o navegador, principalmente no celular.
+const RIFA_POR_PAGINA = 1000;
 let RIFA_PAGINA = 0;
 
 function digitosDoNumero() {
@@ -888,22 +887,30 @@ function renderRifaGrid() {
     btn.addEventListener('click', () => toggleRifaNumero(btn.dataset.id));
   });
 
-  renderRifaPaginacao(totalPaginas, pagina);
+  renderRifaAbas(totalPaginas);
   updateRifaSelecaoBar();
 }
 
-function renderRifaPaginacao(totalPaginas, pagina) {
+// Uma abinha por faixa de mil números, com a contagem de selecionados na aba.
+function renderRifaAbas(totalPaginas) {
   const nav = document.getElementById('rifaPaginacao');
   if (!nav) return;
   if (totalPaginas <= 1) { nav.innerHTML = ''; return; }
-  const primeiro = pagina.length ? pagina[0].numero : 0;
-  const ultimo = pagina.length ? pagina[pagina.length - 1].numero : 0;
+
   const digitos = digitosDoNumero();
-  nav.innerHTML = `
-    <button class="btn btn-outline" ${RIFA_PAGINA === 0 ? 'disabled' : ''} data-pagina="${RIFA_PAGINA - 1}">← Anteriores</button>
-    <span>Números ${String(primeiro).padStart(digitos, '0')} a ${String(ultimo).padStart(digitos, '0')} · página ${RIFA_PAGINA + 1} de ${totalPaginas}</span>
-    <button class="btn btn-outline" ${RIFA_PAGINA >= totalPaginas - 1 ? 'disabled' : ''} data-pagina="${RIFA_PAGINA + 1}">Próximos →</button>
-  `;
+  nav.innerHTML = Array.from({ length: totalPaginas }, (_, i) => {
+    const faixa = RIFA_BILHETES.slice(i * RIFA_POR_PAGINA, (i + 1) * RIFA_POR_PAGINA);
+    if (faixa.length === 0) return '';
+    const primeiro = String(faixa[0].numero).padStart(digitos, '0');
+    const ultimo = String(faixa[faixa.length - 1].numero).padStart(digitos, '0');
+    const escolhidos = faixa.filter(b => RIFA_SELECIONADOS.includes(b.id)).length;
+    return `
+      <button type="button" class="rifa-aba${i === RIFA_PAGINA ? ' ativa' : ''}" data-pagina="${i}">
+        ${primeiro}–${ultimo}${escolhidos ? `<i>${escolhidos}</i>` : ''}
+      </button>
+    `;
+  }).join('');
+
   nav.querySelectorAll('[data-pagina]').forEach(btn => {
     btn.addEventListener('click', () => {
       RIFA_PAGINA = Number(btn.dataset.pagina);
