@@ -953,9 +953,19 @@ async function renderRifaDetail(rifa) {
 
   const statusColor = { disponivel: '#dfe6ee', reservado: '#F5B400', pago: '#3E7A1A' };
 
+  const digitos = String(rifa.total_numeros).length;
+
   detail.innerHTML = `
     <h3>${escapeHtml(rifa.titulo)}</h3>
     <p class="admin-hint">Disponíveis: ${disponiveis} · Reservados: ${reservados.length} · Pagos: ${pagos.length} · Arrecadado: ${totalArrecadado.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</p>
+
+    <h4>Compradores (${pagos.length} número${pagos.length === 1 ? '' : 's'} pago${pagos.length === 1 ? '' : 's'})</h4>
+    <p class="admin-hint">No dia do sorteio, busque aqui pelo número sorteado para achar o ganhador.</p>
+    <div class="crm-filters">
+      <input id="rifaBuscaComprador" placeholder="Buscar por número, nome ou WhatsApp">
+      <button class="admin-btn-sm admin-btn-edit" id="rifaExportarBtn" type="button">Baixar lista (CSV)</button>
+    </div>
+    <div id="rifaCompradores"></div>
 
     <h4>Reservas aguardando confirmação de pagamento</h4>
     ${reservados.length === 0 ? '<p class="admin-hint">Nenhuma no momento.</p>' : reservados.map(b => `
@@ -998,6 +1008,64 @@ async function renderRifaDetail(rifa) {
       }).eq('id', btn.dataset.confirmBilhete);
       if (!error) renderRifaDetail(rifa);
     });
+  });
+
+  // Histórico de quem comprou: é por aqui que se acha o ganhador do sorteio.
+  function renderCompradores(busca = '') {
+    const alvo = detail.querySelector('#rifaCompradores');
+    if (!alvo) return;
+    const termo = busca.trim().toLowerCase();
+    const lista = pagos
+      .filter(b => {
+        if (!termo) return true;
+        const numeroTxt = String(b.numero).padStart(digitos, '0');
+        return numeroTxt.includes(termo)
+          || String(b.numero).includes(termo)
+          || (b.comprador_nome || '').toLowerCase().includes(termo)
+          || (b.comprador_telefone || '').replace(/\D/g, '').includes(termo.replace(/\D/g, ''));
+      })
+      .sort((a, b) => a.numero - b.numero);
+
+    if (lista.length === 0) {
+      alvo.innerHTML = `<p class="admin-hint">${pagos.length === 0 ? 'Nenhum número pago ainda.' : 'Nenhum comprador encontrado para essa busca.'}</p>`;
+      return;
+    }
+
+    alvo.innerHTML = lista.slice(0, 200).map(b => {
+      const zap = (b.comprador_telefone || '').replace(/\D/g, '');
+      return `
+        <div class="admin-list-item">
+          <div>
+            <strong>Número ${String(b.numero).padStart(digitos, '0')}</strong>
+            <div class="meta">${escapeHtml(b.comprador_nome || 'sem nome')} · ${escapeHtml(b.comprador_telefone || 'sem WhatsApp')}${b.confirmado_em ? ` · pago em ${new Date(b.confirmado_em).toLocaleString('pt-BR')}` : ''}</div>
+          </div>
+          <div class="admin-actions">
+            ${zap ? `<a class="admin-btn-sm admin-btn-edit" href="https://wa.me/55${zap.slice(-11)}" target="_blank" rel="noopener">WhatsApp</a>` : ''}
+          </div>
+        </div>
+      `;
+    }).join('') + (lista.length > 200 ? `<p class="admin-hint">Mostrando os 200 primeiros de ${lista.length}. Use a busca ou baixe o CSV.</p>` : '');
+  }
+
+  renderCompradores();
+  detail.querySelector('#rifaBuscaComprador')?.addEventListener('input', (e) => renderCompradores(e.target.value));
+
+  detail.querySelector('#rifaExportarBtn')?.addEventListener('click', () => {
+    const linhas = [['Numero', 'Nome', 'WhatsApp', 'Pago em']].concat(
+      pagos.sort((a, b) => a.numero - b.numero).map(b => [
+        String(b.numero).padStart(digitos, '0'),
+        (b.comprador_nome || '').replace(/;/g, ','),
+        (b.comprador_telefone || '').replace(/;/g, ','),
+        b.confirmado_em ? new Date(b.confirmado_em).toLocaleString('pt-BR') : '',
+      ])
+    );
+    const csv = '﻿' + linhas.map(l => l.join(';')).join('\n');
+    const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `compradores-${rifa.titulo.replace(/[^a-zA-Z0-9]+/g, '-').toLowerCase()}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
   });
 
   // Reserva sem pagamento (a pessoa desistiu ou o comprovante nunca chegou):

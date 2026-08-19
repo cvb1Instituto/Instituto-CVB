@@ -822,7 +822,12 @@ async function toggleRifaExpandida(rifaId) {
         <span><i style="background:var(--yellow-dark)"></i> Reservado</span>
         <span><i style="background:var(--gray-light)"></i> Pago</span>
       </div>
+      <div class="rifa-busca">
+        <input id="rifaBuscaNumero" inputmode="numeric" placeholder="Buscar um número (ex.: 1234)">
+        <button class="btn btn-outline" id="rifaSorteNumeroBtn" type="button">Número da sorte</button>
+      </div>
       <div class="rifa-numeros-grid" id="rifaNumerosGrid"></div>
+      <div class="rifa-paginacao" id="rifaPaginacao"></div>
       <div class="rifa-selecao-bar" id="rifaSelecaoBar" style="display:none;">
         <span id="rifaSelecaoInfo"></span>
         <button class="btn btn-primary" id="rifaContinuarBtn">Continuar</button>
@@ -830,10 +835,12 @@ async function toggleRifaExpandida(rifaId) {
     </div>
   `;
   document.getElementById('rifaContinuarBtn').addEventListener('click', openRifaMultiModal);
+  document.getElementById('rifaBuscaNumero').addEventListener('input', (e) => irParaNumero(e.target.value));
+  document.getElementById('rifaSorteNumeroBtn').addEventListener('click', escolherNumeroDaSorte);
   observarReveal(expandido);
 
   // Antes de mostrar a grade, devolve os números que alguém reservou e não pagou
-  // (mais de 30 minutos), pra ninguém ver como ocupado o que já está livre.
+  // (passou dos 10 minutos), pra ninguém ver como ocupado o que já está livre.
   await supabaseClient.functions.invoke('liberar-reservas-expiradas').catch(() => {});
 
   const { data } = await supabaseClient.from('rifa_bilhetes').select('*').eq('rifa_id', rifaId).order('numero');
@@ -852,17 +859,83 @@ function scrollAbaixoDoHeader(el) {
   window.scrollTo({ top: Math.max(0, y), behavior: 'smooth' });
 }
 
+// A grade é paginada: com 10 mil números, desenhar tudo de uma vez trava o
+// navegador (principalmente no celular). Mostramos 500 por página, com busca
+// direta pelo número e sorteio aleatório pra quem não quer procurar.
+const RIFA_POR_PAGINA = 500;
+let RIFA_PAGINA = 0;
+
+function digitosDoNumero() {
+  const total = CURRENT_RIFA ? Number(CURRENT_RIFA.total_numeros) : 1000;
+  return String(total).length;
+}
+
 function renderRifaGrid() {
   const grid = document.getElementById('rifaNumerosGrid');
   if (!grid) return;
   RIFA_SELECIONADOS = RIFA_SELECIONADOS.filter(id => RIFA_BILHETES.find(b => b.id === id)?.status === 'disponivel');
-  grid.innerHTML = RIFA_BILHETES.map(b => `
-    <button class="rifa-numero ${b.status}${RIFA_SELECIONADOS.includes(b.id) ? ' selecionado' : ''}" data-id="${b.id}" ${b.status !== 'disponivel' ? 'disabled' : ''}>${String(b.numero).padStart(3, '0')}</button>
+
+  const totalPaginas = Math.max(1, Math.ceil(RIFA_BILHETES.length / RIFA_POR_PAGINA));
+  if (RIFA_PAGINA > totalPaginas - 1) RIFA_PAGINA = totalPaginas - 1;
+  const inicio = RIFA_PAGINA * RIFA_POR_PAGINA;
+  const pagina = RIFA_BILHETES.slice(inicio, inicio + RIFA_POR_PAGINA);
+  const digitos = digitosDoNumero();
+
+  grid.innerHTML = pagina.map(b => `
+    <button class="rifa-numero ${b.status}${RIFA_SELECIONADOS.includes(b.id) ? ' selecionado' : ''}" data-id="${b.id}" ${b.status !== 'disponivel' ? 'disabled' : ''}>${String(b.numero).padStart(digitos, '0')}</button>
   `).join('');
   grid.querySelectorAll('.rifa-numero.disponivel').forEach(btn => {
     btn.addEventListener('click', () => toggleRifaNumero(btn.dataset.id));
   });
+
+  renderRifaPaginacao(totalPaginas, pagina);
   updateRifaSelecaoBar();
+}
+
+function renderRifaPaginacao(totalPaginas, pagina) {
+  const nav = document.getElementById('rifaPaginacao');
+  if (!nav) return;
+  if (totalPaginas <= 1) { nav.innerHTML = ''; return; }
+  const primeiro = pagina.length ? pagina[0].numero : 0;
+  const ultimo = pagina.length ? pagina[pagina.length - 1].numero : 0;
+  const digitos = digitosDoNumero();
+  nav.innerHTML = `
+    <button class="btn btn-outline" ${RIFA_PAGINA === 0 ? 'disabled' : ''} data-pagina="${RIFA_PAGINA - 1}">← Anteriores</button>
+    <span>Números ${String(primeiro).padStart(digitos, '0')} a ${String(ultimo).padStart(digitos, '0')} · página ${RIFA_PAGINA + 1} de ${totalPaginas}</span>
+    <button class="btn btn-outline" ${RIFA_PAGINA >= totalPaginas - 1 ? 'disabled' : ''} data-pagina="${RIFA_PAGINA + 1}">Próximos →</button>
+  `;
+  nav.querySelectorAll('[data-pagina]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      RIFA_PAGINA = Number(btn.dataset.pagina);
+      renderRifaGrid();
+      document.getElementById('rifaNumerosGrid')?.scrollTo({ top: 0 });
+    });
+  });
+}
+
+// Busca: leva direto para a página onde o número está e o destaca.
+function irParaNumero(texto) {
+  const alvo = Number(String(texto).replace(/\D/g, ''));
+  if (!alvo) return;
+  const indice = RIFA_BILHETES.findIndex(b => b.numero === alvo);
+  if (indice === -1) return;
+  RIFA_PAGINA = Math.floor(indice / RIFA_POR_PAGINA);
+  renderRifaGrid();
+  const botao = document.querySelector(`.rifa-numero[data-id="${RIFA_BILHETES[indice].id}"]`);
+  if (botao) {
+    botao.classList.add('destacado');
+    botao.scrollIntoView({ block: 'center' });
+  }
+}
+
+function escolherNumeroDaSorte() {
+  const livres = RIFA_BILHETES.filter(b => b.status === 'disponivel' && !RIFA_SELECIONADOS.includes(b.id));
+  if (livres.length === 0) return;
+  const sorteado = livres[Math.floor(Math.random() * livres.length)];
+  RIFA_SELECIONADOS.push(sorteado.id);
+  RIFA_PAGINA = Math.floor(RIFA_BILHETES.findIndex(b => b.id === sorteado.id) / RIFA_POR_PAGINA);
+  renderRifaGrid();
+  document.querySelector(`.rifa-numero[data-id="${sorteado.id}"]`)?.scrollIntoView({ block: 'center' });
 }
 
 function toggleRifaNumero(id) {
@@ -885,7 +958,7 @@ function updateRifaSelecaoBar() {
     .filter(Boolean)
     .sort((a, b) => a.numero - b.numero);
   const total = bilhetes.length * Number(CURRENT_RIFA.preco_numero);
-  const numeros = bilhetes.map(b => String(b.numero).padStart(3, '0')).join(', ');
+  const numeros = bilhetes.map(b => String(b.numero).padStart(digitosDoNumero(), '0')).join(', ');
   info.innerHTML = `<strong>${bilhetes.length}</strong> número${bilhetes.length > 1 ? 's' : ''} selecionado${bilhetes.length > 1 ? 's' : ''}: ${numeros} — Total: <strong>${formatBRL(total)}</strong>`;
 }
 
@@ -969,7 +1042,7 @@ function openRifaMultiModal() {
   if (bilhetes.length === 0) return;
 
   const numerosArr = bilhetes.map(b => b.numero);
-  const numerosStr = bilhetes.map(b => String(b.numero).padStart(3, '0')).join(', ');
+  const numerosStr = bilhetes.map(b => String(b.numero).padStart(digitosDoNumero(), '0')).join(', ');
   const total = bilhetes.length * Number(CURRENT_RIFA.preco_numero);
   const plural = bilhetes.length > 1;
   const rifaIdAtual = CURRENT_RIFA.id;
@@ -989,7 +1062,7 @@ function openRifaMultiModal() {
       <div class="rifa-form">
         <div class="admin-field"><label>Seu nome</label><input id="rifaNome" required></div>
         <div class="admin-field"><label>WhatsApp</label><input id="rifaTelefone" required placeholder="(27) 9####-####"></div>
-        ${manual ? '' : '<div class="admin-field"><label>E-mail</label><input id="rifaEmail" type="email" required></div>'}
+        ${MODO_PAGAMENTO_RIFA === 'automatico' ? '<div class="admin-field"><label>E-mail</label><input id="rifaEmail" type="email" required></div>' : ''}
         <div id="rifaFormFeedback"></div>
         <button class="btn btn-primary" id="rifaReservarBtn">${rotuloBotaoPagamento(true)}</button>
       </div>
@@ -1004,8 +1077,8 @@ function openRifaMultiModal() {
     const emailEl = document.getElementById('rifaEmail');
     const email = emailEl ? emailEl.value.trim() : '';
     const feedback = document.getElementById('rifaFormFeedback');
-    if (!nome || !telefone || (!manual && !email)) {
-      feedback.innerHTML = `<div class="admin-error">Preencha ${manual ? 'nome e WhatsApp' : 'nome, WhatsApp e e-mail'}.</div>`;
+    if (!nome || !telefone || (MODO_PAGAMENTO_RIFA === 'automatico' && !email)) {
+      feedback.innerHTML = `<div class="admin-error">Preencha ${MODO_PAGAMENTO_RIFA === 'automatico' ? 'nome, WhatsApp e e-mail' : 'nome e WhatsApp'}.</div>`;
       return;
     }
     document.getElementById('rifaReservarBtn').disabled = true;
@@ -1107,7 +1180,7 @@ async function reservarNumerosManual(container, { bilhetes, nome, telefone }) {
     return;
   }
 
-  const numerosOk = reservados.map(r => String(r.numero).padStart(3, '0')).sort();
+  const numerosOk = reservados.map(r => String(r.numero).padStart(digitosDoNumero(), '0')).sort();
   const perdidos = ids.length - reservados.length;
   const valor = reservados.length * Number(CURRENT_RIFA.preco_numero);
 
