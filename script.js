@@ -149,21 +149,35 @@ function setupHeaderScroll() {
 }
 
 // ---- Animação de entrada ao rolar ----
+let REVEAL_OBSERVER = null;
+
 function setupReveal() {
-  const els = document.querySelectorAll('.reveal');
-  if (!('IntersectionObserver' in window) || els.length === 0) {
-    els.forEach(el => el.classList.add('in-view'));
+  if (!('IntersectionObserver' in window)) {
+    document.querySelectorAll('.reveal').forEach(el => el.classList.add('in-view'));
     return;
   }
-  const observer = new IntersectionObserver((entries) => {
+  REVEAL_OBSERVER = new IntersectionObserver((entries) => {
     entries.forEach(entry => {
       if (entry.isIntersecting) {
         entry.target.classList.add('in-view');
-        observer.unobserve(entry.target);
+        REVEAL_OBSERVER.unobserve(entry.target);
       }
     });
   }, { threshold: 0.12 });
-  els.forEach(el => observer.observe(el));
+  observarReveal(document);
+}
+
+// Registra elementos .reveal criados DEPOIS do carregamento — como a grade de
+// números da rifa, que só nasce quando o visitante clica em "Ajudar".
+// Sem isso eles ficam presos no opacity:0 do .reveal e nunca aparecem.
+function observarReveal(root) {
+  if (!root || !root.querySelectorAll) return;
+  const els = root.querySelectorAll('.reveal');
+  if (!REVEAL_OBSERVER) {
+    els.forEach(el => el.classList.add('in-view'));
+    return;
+  }
+  els.forEach(el => REVEAL_OBSERVER.observe(el));
 }
 
 // ---- Formulário de contato (abre cliente de e-mail) ----
@@ -782,6 +796,7 @@ async function toggleRifaExpandida(rifaId) {
     </div>
   `;
   document.getElementById('rifaContinuarBtn').addEventListener('click', openRifaMultiModal);
+  observarReveal(expandido);
 
   const { data } = await supabaseClient.from('rifa_bilhetes').select('*').eq('rifa_id', rifaId).order('numero');
   RIFA_BILHETES = data || [];
@@ -1088,7 +1103,7 @@ async function loadContent() {
   setupReveal();
 }
 
-// ---- Assistente VIVA ----
+// ---- Assistente Aninha ----
 let VIVA_HISTORY = [];
 
 function setupVivaChat() {
@@ -1123,7 +1138,7 @@ function setupVivaChat() {
     widget.classList.toggle('open');
     if (widget.classList.contains('open') && !opened) {
       opened = true;
-      addMessage('Oi! Eu sou a VIVA, assistente virtual do Instituto CVB 💚 Posso te ajudar a conhecer nossos projetos, como ajudar, voluntariado, a rifa solidária ou qualquer dúvida sobre o instituto. Pode perguntar!', 'bot');
+      addMessage('Oi! Eu sou a Aninha, assistente virtual do Instituto CVB 💚 Posso te ajudar a conhecer nossos projetos, como ajudar, voluntariado, a rifa solidária ou qualquer dúvida sobre o instituto. Pode perguntar!', 'bot');
       input.focus();
     }
   });
