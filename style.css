@@ -576,6 +576,7 @@ button.partner-box:hover { box-shadow: var(--shadow-md); transform: translateY(-
 .rifa-form .admin-field { margin-bottom: 14px; }
 .rifa-pix-box { background: var(--light-bg); border-radius: var(--radius); padding: 20px; margin-top: 16px; }
 .rifa-pix-box .chave { font-family: monospace; font-size: 15px; font-weight: 700; word-break: break-all; }
+.rifa-pix-qr { display: block; margin: 0 auto 8px; border-radius: 10px; background: var(--white); }
 
 /* ---- Admin (login/dashboard) shared bits ---- */
 .admin-body { background: var(--light-bg); min-height: 100vh; font-family: var(--font-body); }

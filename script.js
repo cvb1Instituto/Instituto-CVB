@@ -1123,6 +1123,57 @@ async function reservarNumerosManual(container, { bilhetes, nome, telefone }) {
   ativarBotoesPixManual({ valor, nome, numeros: numerosOk.join(', ') });
 }
 
+// ---- BR Code: o "copia e cola" do Pix, já com o valor da compra ----
+// Monta o payload no padrão EMV do Banco Central (campo = id + tamanho + valor),
+// para o app do banco abrir com o valor certo em vez de a pessoa digitar.
+
+function campoEmv(id, valor) {
+  return id + String(valor.length).padStart(2, '0') + valor;
+}
+
+// Só ASCII maiúsculo: acento e símbolo quebram a leitura em alguns bancos.
+function limparTextoEmv(texto, maximo) {
+  return (texto || '')
+    .normalize('NFD')
+    .replace(/[^A-Za-z0-9 ]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toUpperCase()
+    .slice(0, maximo);
+}
+
+function crc16Pix(payload) {
+  let crc = 0xFFFF;
+  for (let i = 0; i < payload.length; i++) {
+    crc ^= payload.charCodeAt(i) << 8;
+    for (let bit = 0; bit < 8; bit++) {
+      crc = (crc & 0x8000) ? ((crc << 1) ^ 0x1021) : (crc << 1);
+      crc &= 0xFFFF;
+    }
+  }
+  return crc.toString(16).toUpperCase().padStart(4, '0');
+}
+
+function gerarBRCode({ chave, nome, cidade, valor, txid }) {
+  if (!chave) return '';
+  const merchantAccount = campoEmv('00', 'BR.GOV.BCB.PIX') + campoEmv('01', chave);
+  const identificador = (txid || '***').replace(/[^A-Za-z0-9]/g, '').slice(0, 25) || '***';
+
+  const semCrc =
+    campoEmv('00', '01') +
+    campoEmv('26', merchantAccount) +
+    campoEmv('52', '0000') +
+    campoEmv('53', '986') +
+    campoEmv('54', Number(valor).toFixed(2)) +
+    campoEmv('58', 'BR') +
+    campoEmv('59', limparTextoEmv(nome, 25) || 'INSTITUTO CVB') +
+    campoEmv('60', limparTextoEmv(cidade, 15) || 'VITORIA') +
+    campoEmv('62', campoEmv('05', identificador)) +
+    '6304';
+
+  return semCrc + crc16Pix(semCrc);
+}
+
 function boxPixManualHtml({ valor, numeros }) {
   const chave = PIX_INFO.chave || '';
   const tipoChave = PIX_INFO.tipo || 'Chave Pix';
@@ -1130,9 +1181,12 @@ function boxPixManualHtml({ valor, numeros }) {
   return `
     <div class="rifa-pix-box">
       <p style="text-align:center; margin-bottom:14px;"><strong>Pague ${formatBRL(valor)} via Pix</strong></p>
-      <p style="font-size:13px; color:var(--gray); margin-bottom:6px;">${escapeHtml(tipoChave)} — ${escapeHtml(beneficiario)}</p>
+      <div id="pixQrCanvas" class="rifa-pix-qr"></div>
+      <p style="font-size:12.5px; color:var(--gray-light); text-align:center; margin-bottom:10px;">Aponte a câmera do app do banco — o valor já vai preenchido.</p>
+      <button class="btn btn-primary" id="pixCopiarCodigoBtn" type="button" style="width:100%;">Copiar código Pix (copia e cola)</button>
+      <p style="font-size:13px; color:var(--gray); margin:16px 0 4px;">Ou pague pela chave — ${escapeHtml(tipoChave)}, ${escapeHtml(beneficiario)}:</p>
       <p class="chave" id="pixChaveManual">${escapeHtml(chave)}</p>
-      <button class="btn btn-outline" id="pixCopiarChaveBtn" type="button" style="margin-top:12px;width:100%;">Copiar chave Pix</button>
+      <button class="btn btn-outline" id="pixCopiarChaveBtn" type="button" style="margin-top:10px;width:100%;">Copiar chave Pix</button>
       <p style="font-size:13.5px; color:var(--gray); margin-top:16px;">
         Depois de pagar, <strong>envie o comprovante no WhatsApp</strong> para confirmarmos${numeros ? ' o seu número' : ' a sua contribuição'}.
         A reserva vale 30 minutos; assim que confirmarmos, o número passa a ser seu de vez.
@@ -1144,6 +1198,37 @@ function boxPixManualHtml({ valor, numeros }) {
 
 function ativarBotoesPixManual({ valor, nome, numeros }) {
   const chave = PIX_INFO.chave || '';
+
+  const codigo = gerarBRCode({
+    chave,
+    nome: PIX_INFO.nome_beneficiario || 'Instituto CVB',
+    cidade: PIX_INFO.cidade || 'Vitoria',
+    valor,
+    txid: numeros ? `RIFA${numeros.replace(/\D/g, '').slice(0, 20)}` : 'DOACAOCVB',
+  });
+
+  const areaQr = document.getElementById("pixQrCanvas");
+  if (areaQr && codigo && window.QRCode) {
+    new QRCode(areaQr, { text: codigo, width: 220, height: 220, correctLevel: QRCode.CorrectLevel.M });
+  } else if (areaQr) {
+    areaQr.remove();
+  }
+
+  const copiarCodigo = document.getElementById('pixCopiarCodigoBtn');
+  if (copiarCodigo) {
+    if (!codigo) {
+      copiarCodigo.remove();
+    } else {
+      copiarCodigo.addEventListener('click', async () => {
+        try {
+          await navigator.clipboard.writeText(codigo);
+          copiarCodigo.textContent = 'Código copiado!';
+          setTimeout(() => { copiarCodigo.textContent = 'Copiar código Pix (copia e cola)'; }, 2000);
+        } catch (e) { /* sem clipboard: a pessoa usa o QR ou a chave */ }
+      });
+    }
+  }
+
   const copiar = document.getElementById('pixCopiarChaveBtn');
   if (copiar) {
     copiar.addEventListener('click', async () => {
