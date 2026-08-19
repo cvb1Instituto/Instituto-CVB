@@ -874,6 +874,56 @@ async function renderRifa(content) {
   });
 }
 
+// Aumentar ou diminuir a quantidade de números de uma rifa já criada.
+// Aumentar: cria só os que faltam, em blocos (10 mil linhas de uma vez estoura).
+// Diminuir: só apaga número que ninguém reservou nem pagou.
+async function ajustarTotalDeNumeros(rifa, novoTotal, feedback) {
+  const { data: maiores } = await supabaseClient
+    .from('rifa_bilhetes')
+    .select('numero')
+    .eq('rifa_id', rifa.id)
+    .order('numero', { ascending: false })
+    .limit(1);
+  const maiorAtual = maiores && maiores.length ? Number(maiores[0].numero) : 0;
+
+  if (novoTotal > maiorAtual) {
+    const quantos = novoTotal - maiorAtual;
+    if (!confirm(`Criar ${quantos.toLocaleString('pt-BR')} números novos (do ${maiorAtual + 1} ao ${novoTotal})?`)) {
+      throw new Error('Alteração cancelada.');
+    }
+    const BLOCO = 1000;
+    for (let inicio = maiorAtual + 1; inicio <= novoTotal; inicio += BLOCO) {
+      const fim = Math.min(inicio + BLOCO - 1, novoTotal);
+      const linhas = [];
+      for (let n = inicio; n <= fim; n++) linhas.push({ rifa_id: rifa.id, numero: n });
+      const { error } = await supabaseClient.from('rifa_bilhetes').insert(linhas);
+      if (error) throw error;
+      feedback.innerHTML = `Criando números... ${fim.toLocaleString('pt-BR')} de ${novoTotal.toLocaleString('pt-BR')}`;
+    }
+    return;
+  }
+
+  if (novoTotal < maiorAtual) {
+    const { data: ocupados } = await supabaseClient
+      .from('rifa_bilhetes')
+      .select('numero')
+      .eq('rifa_id', rifa.id)
+      .gt('numero', novoTotal)
+      .neq('status', 'disponivel')
+      .order('numero')
+      .limit(5);
+
+    if (ocupados && ocupados.length > 0) {
+      throw new Error(`Não dá para diminuir: os números ${ocupados.map(o => o.numero).join(', ')}${ocupados.length === 5 ? '...' : ''} já estão reservados ou pagos.`);
+    }
+    if (!confirm(`Apagar os números acima de ${novoTotal}? Eles estão todos livres.`)) {
+      throw new Error('Alteração cancelada.');
+    }
+    const { error } = await supabaseClient.from('rifa_bilhetes').delete().eq('rifa_id', rifa.id).gt('numero', novoTotal);
+    if (error) throw error;
+  }
+}
+
 function renderRifaEditForm(rifa, content) {
   const detail = document.getElementById('rifaDetail');
   detail.innerHTML = `
@@ -891,7 +941,11 @@ function renderRifaEditForm(rifa, content) {
       <input type="text" id="editrifa_video_url" value="${escapeHtml(rifa.video_url || '')}" placeholder="https://www.youtube.com/watch?v=...">
     </div>
     <div class="admin-field"><label>Preço por número (R$)</label><input type="number" id="editrifa_preco" value="${rifa.preco_numero}" step="0.01"></div>
-    <div class="admin-hint">O total de números (${rifa.total_numeros}) não pode ser alterado depois de criada.</div>
+    <div class="admin-field">
+      <label>Total de números</label>
+      <input type="number" id="editrifa_total" value="${rifa.total_numeros}" step="1" min="1">
+      <p class="admin-hint">Aumentar cria os números que faltam (ex.: de 1000 para 10000 cria do 1001 ao 10000). Diminuir só é possível se os números que sobram ainda estiverem livres.</p>
+    </div>
     <div class="admin-field"><label>Data do sorteio</label><input type="date" id="editrifa_data_sorteio" value="${rifa.data_sorteio || ''}"></div>
     <div class="admin-field">
       <label>Status</label>
@@ -916,7 +970,15 @@ function renderRifaEditForm(rifa, content) {
       const fileInput = document.getElementById('editrifa_premio_imagem_url_file');
       if (fileInput.files[0]) imagemUrl = await uploadImage(fileInput.files[0]);
 
+      const novoTotal = Number(document.getElementById('editrifa_total').value) || 0;
+      if (novoTotal < 1) throw new Error('O total de números precisa ser pelo menos 1.');
+
+      if (novoTotal !== Number(rifa.total_numeros)) {
+        await ajustarTotalDeNumeros(rifa, novoTotal, feedback);
+      }
+
       const { error } = await supabaseClient.from('rifas').update({
+        total_numeros: novoTotal,
         titulo: document.getElementById('editrifa_titulo').value,
         descricao: document.getElementById('editrifa_descricao').value,
         premio_imagem_url: imagemUrl || null,
