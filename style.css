@@ -342,11 +342,11 @@ img { max-width: 100%; display: block; }
   background: var(--white);
   border-radius: var(--radius-sm);
   border: 1px solid rgba(31,36,48,0.08);
-  min-width: 190px; min-height: 100px;
+  min-width: 220px; min-height: 130px;
   flex-shrink: 0;
   scroll-snap-align: start;
   display: flex; align-items: center; justify-content: center;
-  padding: 18px;
+  padding: 14px;
   color: var(--gray-light);
   font-weight: 600;
   text-align: center;
@@ -356,7 +356,9 @@ img { max-width: 100%; display: block; }
   transition: box-shadow .15s ease, transform .15s ease;
 }
 button.partner-box:hover { box-shadow: var(--shadow-md); transform: translateY(-2px); }
-.partner-logo { max-height: 48px; max-width: 100%; pointer-events: none; }
+/* A logo ocupa o quadrado inteiro (respeitando a proporção): antes ficava
+   perdida no meio da caixa. */
+.partner-logo { width: 100%; height: 100px; object-fit: contain; max-width: 100%; pointer-events: none; }
 .partner-cta { border: 2px dashed rgba(31,36,48,0.15); background: transparent; cursor: default; }
 .partner-cta:hover { box-shadow: none; transform: none; }
 .section-partners-top { padding: 28px 0 8px; }
@@ -402,6 +404,15 @@ button.partner-box:hover { box-shadow: var(--shadow-md); transform: translateY(-
 .footer-brand { display: flex; align-items: center; gap: 10px; color: var(--white); font-weight: 600; }
 .footer-brand .logo-mark { height: 32px; width: 32px; }
 .footer p { margin: 0; font-size: 13.5px; color: rgba(255,255,255,0.55); }
+.footer-creditos { text-align: right; display: flex; flex-direction: column; gap: 6px; }
+.footer-autor { display: flex; align-items: center; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
+.footer-autor strong { color: rgba(255,255,255,0.8); letter-spacing: .02em; }
+.footer-autor a { color: var(--yellow); font-weight: 600; }
+.footer-autor a:hover { text-decoration: underline; }
+@media (max-width: 700px) {
+  .footer-creditos { text-align: left; }
+  .footer-autor { justify-content: flex-start; }
+}
 
 /* ---- Responsive ---- */
 @media (max-width: 900px) {

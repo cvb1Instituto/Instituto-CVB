@@ -7,7 +7,7 @@
 <meta name="robots" content="noindex">
 <link rel="icon" type="image/png" href="logo.png">
 <link rel="apple-touch-icon" href="icon-full.png">
-<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="style.css?v=20260819b">
 </head>
 <body class="admin-body">
 
@@ -34,7 +34,7 @@
 </div>
 
 <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
-<script src="config.js"></script>
+<script src="config.js?v=20260819b"></script>
 <script>
   (async () => {
     const { data: { session } } = await supabaseClient.auth.getSession();
