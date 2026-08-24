@@ -1077,9 +1077,29 @@ async function renderRifaDetail(rifa) {
       </div>
     `).join('')}
 
+    <h4>Doações concluídas (${livresConfirmadas.length}) — ${livresConfirmadas.reduce((s, l) => s + Number(l.valor), 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</h4>
+    <p class="admin-hint">Quem ajudou pelo botão "Ajudar com outro valor", sem escolher número.</p>
+    ${livresConfirmadas.length === 0 ? '<p class="admin-hint">Nenhuma ainda.</p>' : livresConfirmadas
+      .slice()
+      .sort((a, b) => new Date(b.confirmado_em || b.created_at) - new Date(a.confirmado_em || a.created_at))
+      .map(l => {
+        const zap = (l.telefone || '').replace(/\D/g, '');
+        return `
+          <div class="admin-list-item">
+            <div>
+              <strong>${Number(l.valor).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</strong>
+              <div class="meta">${escapeHtml(l.nome || 'sem nome')} · ${escapeHtml(l.telefone || 'sem WhatsApp')} · ${new Date(l.confirmado_em || l.created_at).toLocaleString('pt-BR')}</div>
+            </div>
+            <div class="admin-actions">
+              ${zap ? `<a class="admin-btn-sm admin-btn-edit" href="https://wa.me/55${zap.slice(-11)}" target="_blank" rel="noopener">WhatsApp</a>` : ''}
+            </div>
+          </div>
+        `;
+      }).join('')}
+
     <h4>Grade de números</h4>
     <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(28px, 1fr)); gap:3px; max-width:700px;">
-      ${bilhetes.map(b => `<div title="${String(b.numero).padStart(3, '0')} — ${b.status}" style="aspect-ratio:1; border-radius:4px; background:${statusColor[b.status]};"></div>`).join('')}
+      ${bilhetes.map(b => `<div title="${String(b.numero).padStart(digitos, '0')} — ${b.status}" style="aspect-ratio:1; border-radius:4px; background:${statusColor[b.status]};"></div>`).join('')}
     </div>
   `;
 
