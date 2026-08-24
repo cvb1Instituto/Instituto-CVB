@@ -22,6 +22,11 @@ const MODO_PAGAMENTO_RIFA = 'automatico';
 
 // Tempo que um número fica reservado esperando o pagamento.
 const MINUTOS_DE_RESERVA = 10;
+
+// Acréscimo por número quando a pessoa escolhe cartão, para cobrir a taxa da
+// operadora. No Pix não há acréscimo. O valor também é aplicado no servidor
+// (create-checkout-preference), então mudar só aqui não altera a cobrança.
+const TAXA_CARTAO_POR_NUMERO = 0.55;
 let CURRENT_RIFA = null;
 let RIFA_BILHETES = [];
 let RIFA_SELECIONADOS = [];
@@ -1074,6 +1079,7 @@ function openRifaMultiModal() {
   const numerosArr = bilhetes.map(b => b.numero);
   const numerosStr = bilhetes.map(b => String(b.numero).padStart(digitosDoNumero(), '0')).join(', ');
   const total = bilhetes.length * Number(CURRENT_RIFA.preco_numero);
+  const totalCartao = total + bilhetes.length * TAXA_CARTAO_POR_NUMERO;
   const plural = bilhetes.length > 1;
   const rifaIdAtual = CURRENT_RIFA.id;
 
@@ -1088,13 +1094,17 @@ function openRifaMultiModal() {
         ? `Preencha seus dados para reservar ${plural ? 'os números' : 'o número'} e pagar ${formatBRL(total)} via Pix.`
         : MODO_PAGAMENTO_RIFA === 'checkout'
           ? `Preencha seus dados para pagar ${formatBRL(total)} com Pix, cartão ou boleto.`
-          : `Preencha seus dados para pagar ${formatBRL(total)} via Pix.`}</p>
+          : 'Preencha seus dados e escolha como pagar.'}</p>
       <div class="rifa-form">
         <div class="admin-field"><label>Seu nome</label><input id="rifaNome" required></div>
         <div class="admin-field"><label>WhatsApp</label><input id="rifaTelefone" required placeholder="(27) 9####-####"></div>
-        
+
         <div id="rifaFormFeedback"></div>
-        <button class="btn btn-primary" id="rifaReservarBtn">${rotuloBotaoPagamento(true)}</button>
+        ${MODO_PAGAMENTO_RIFA === 'automatico' ? `
+          <button class="btn btn-primary" id="rifaReservarBtn">Pagar ${formatBRL(total)} no Pix</button>
+          <button class="btn btn-outline" id="rifaCartaoBtn" style="margin-top:10px;">Pagar ${formatBRL(totalCartao)} no cartão</button>
+          <p class="rifa-taxa-aviso">No cartão a operadora cobra taxa, por isso ${formatBRL(TAXA_CARTAO_POR_NUMERO)} a mais por número. No Pix não há acréscimo.</p>
+        ` : `<button class="btn btn-primary" id="rifaReservarBtn">${rotuloBotaoPagamento(true)}</button>`}
       </div>
     </div>
   `;
@@ -1131,6 +1141,25 @@ function openRifaMultiModal() {
     }, () => {
       RIFA_SELECIONADOS = [];
       refreshRifaBilhetes();
+    });
+  });
+
+  // Cartão: vai para a página do Mercado Pago, já com a taxa somada. Quem calcula
+  // o valor final é o servidor — aqui é só o que a pessoa vê antes de decidir.
+  document.getElementById('rifaCartaoBtn')?.addEventListener('click', async () => {
+    const nome = document.getElementById('rifaNome').value.trim();
+    const telefone = document.getElementById('rifaTelefone').value.trim();
+    const feedback = document.getElementById('rifaFormFeedback');
+    if (!nome || !telefone) {
+      feedback.innerHTML = `<div class="admin-error">Preencha nome e WhatsApp.</div>`;
+      return;
+    }
+    document.getElementById('rifaCartaoBtn').disabled = true;
+    document.getElementById('rifaReservarBtn').disabled = true;
+    feedback.innerHTML = '';
+
+    await iniciarCheckoutPro(content, {
+      tipo: 'rifa_numero', rifa_id: rifaIdAtual, numeros: numerosArr, nome, telefone, meio: 'cartao',
     });
   });
 }

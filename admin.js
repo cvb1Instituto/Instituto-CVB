@@ -29,6 +29,70 @@ function escapeHtml(str) {
   return div.innerHTML;
 }
 
+// =====================================================================
+// Senha mestre para exclusões
+//
+// Trava contra exclusão acidental ou por funcionário sem autorização: antes de
+// apagar qualquer coisa o painel pede uma senha. Aqui fica só o resumo
+// (SHA-256) dela, nunca a senha em texto.
+//
+// Limite honesto: isso roda no navegador, então protege contra quem opera o
+// painel — não contra alguém com conhecimento técnico e login de admin. Para
+// blindagem real, a exclusão precisa passar por uma função no servidor.
+// =====================================================================
+const SENHA_MESTRE_HASH = 'bbdb5ca206866e8cc92feb014064438eec3ac2ebf6310458533efec7f903a80c';
+
+async function resumoSha256(texto) {
+  const bytes = new TextEncoder().encode(texto);
+  const hash = await crypto.subtle.digest('SHA-256', bytes);
+  return [...new Uint8Array(hash)].map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+// Pergunta a senha mestre e devolve true/false. `aviso` explica o que será
+// apagado, pra pessoa saber o que está confirmando.
+function pedirSenhaMestre(aviso) {
+  return new Promise(resolve => {
+    const overlay = document.createElement('div');
+    overlay.className = 'senha-mestre-overlay';
+    overlay.innerHTML = `
+      <div class="senha-mestre-caixa">
+        <h3>🔒 Confirmação necessária</h3>
+        <p>${escapeHtml(aviso)}</p>
+        <p class="admin-hint">Digite a senha mestre para continuar. Esta ação não pode ser desfeita.</p>
+        <input type="password" id="senhaMestreInput" placeholder="Senha mestre" autocomplete="off">
+        <div id="senhaMestreErro"></div>
+        <div class="senha-mestre-acoes">
+          <button class="btn btn-outline" id="senhaMestreCancelar" type="button">Cancelar</button>
+          <button class="btn btn-primary" id="senhaMestreOk" type="button">Confirmar exclusão</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(overlay);
+    const input = overlay.querySelector('#senhaMestreInput');
+    input.focus();
+
+    function fechar(resultado) {
+      overlay.remove();
+      resolve(resultado);
+    }
+
+    async function validar() {
+      const digitada = input.value;
+      if (!digitada) return;
+      const confere = (await resumoSha256(digitada)) === SENHA_MESTRE_HASH;
+      if (confere) return fechar(true);
+      overlay.querySelector('#senhaMestreErro').innerHTML = '<div class="admin-error">Senha incorreta.</div>';
+      input.value = '';
+      input.focus();
+    }
+
+    overlay.querySelector('#senhaMestreOk').addEventListener('click', validar);
+    overlay.querySelector('#senhaMestreCancelar').addEventListener('click', () => fechar(false));
+    input.addEventListener('keydown', e => { if (e.key === 'Enter') validar(); });
+    overlay.addEventListener('click', e => { if (e.target === overlay) fechar(false); });
+  });
+}
+
 async function requireSession() {
   const { data: { session } } = await supabaseClient.auth.getSession();
   if (!session) {
@@ -497,7 +561,7 @@ async function renderCrud(content, config) {
 
   content.querySelectorAll('[data-delete]').forEach(btn => {
     btn.addEventListener('click', async () => {
-      if (!confirm('Tem certeza que quer excluir?')) return;
+      if (!await pedirSenhaMestre('Você está excluindo um registro do site.')) return;
       const { error: delError } = await supabaseClient.from(config.table).delete().eq('id', btn.dataset.delete);
       if (delError) {
         document.getElementById('feedback').innerHTML = `<div class="admin-error">${escapeHtml(delError.message)}</div>`;
@@ -656,7 +720,7 @@ async function renderPrestacaoContas(content) {
 
   content.querySelectorAll('[data-pc-delete]').forEach(btn => {
     btn.addEventListener('click', async () => {
-      if (!confirm('Excluir esse registro da prestação de contas?')) return;
+      if (!await pedirSenhaMestre('Você está excluindo um registro da prestação de contas.')) return;
       const { error } = await supabaseClient.from('prestacao_contas').delete().eq('id', btn.dataset.pcDelete);
       if (error) {
         document.getElementById('pcFeedback').innerHTML = `<div class="admin-error">${escapeHtml(error.message)}</div>`;
@@ -826,7 +890,7 @@ async function renderRifa(content) {
   content.querySelectorAll('[data-excluir]').forEach(btn => {
     btn.addEventListener('click', async () => {
       const rifa = rifas.find(r => r.id === btn.dataset.excluir);
-      if (!confirm(`Excluir a rifa "${rifa.titulo}"? Isso apaga também todos os números e contribuições dela. Não dá pra desfazer.`)) return;
+      if (!await pedirSenhaMestre(`Você está excluindo a rifa "${rifa.titulo}", junto com todos os números vendidos, os compradores e as doações dela.`)) return;
       const feedback = document.getElementById('feedback');
       feedback.innerHTML = 'Excluindo...';
       await supabaseClient.from('rifa_bilhetes').delete().eq('rifa_id', rifa.id);
@@ -916,7 +980,7 @@ async function ajustarTotalDeNumeros(rifa, novoTotal, feedback) {
     if (ocupados && ocupados.length > 0) {
       throw new Error(`Não dá para diminuir: os números ${ocupados.map(o => o.numero).join(', ')}${ocupados.length === 5 ? '...' : ''} já estão reservados ou pagos.`);
     }
-    if (!confirm(`Apagar os números acima de ${novoTotal}? Eles estão todos livres.`)) {
+    if (!await pedirSenhaMestre(`Você está apagando os números acima de ${novoTotal}. Eles estão todos livres.`)) {
       throw new Error('Alteração cancelada.');
     }
     const { error } = await supabaseClient.from('rifa_bilhetes').delete().eq('rifa_id', rifa.id).gt('numero', novoTotal);
@@ -1369,7 +1433,7 @@ async function openCrmCardDetail(id) {
   overlay.querySelector('#crmDetailClose').addEventListener('click', close);
   overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
   overlay.querySelector('#crmDetailDelete').addEventListener('click', async () => {
-    if (!confirm('Excluir esse contato definitivamente?')) return;
+    if (!await pedirSenhaMestre('Você está excluindo um contato do CRM definitivamente.')) return;
     const { error } = await supabaseClient.from('contatos_crm').delete().eq('id', id);
     if (!error) {
       CRM_CONTATOS_CACHE = CRM_CONTATOS_CACHE.filter(x => x.id !== id);
@@ -1421,7 +1485,7 @@ function renderCrmColunasPanel() {
   });
   panel.querySelectorAll('[data-col-delete]').forEach(btn => {
     btn.addEventListener('click', async () => {
-      if (!confirm('Excluir essa coluna? Os cartões dela ficam sem coluna.')) return;
+      if (!await pedirSenhaMestre('Você está excluindo uma coluna do CRM. Os cartões dela ficam sem coluna.')) return;
       await supabaseClient.from('kanban_colunas').delete().eq('id', btn.dataset.colDelete);
       CRM_COLUNAS_CACHE = CRM_COLUNAS_CACHE.filter(c => c.id !== btn.dataset.colDelete);
       renderCrmColunasPanel();
@@ -1564,7 +1628,7 @@ async function renderUsuarios(content) {
 
   content.querySelectorAll('[data-remove]').forEach(btn => {
     btn.addEventListener('click', async () => {
-      if (!confirm('Remover esse usuário? Ele perde o acesso imediatamente.')) return;
+      if (!await pedirSenhaMestre('Você está removendo um usuário do painel. Ele perde o acesso imediatamente.')) return;
       const { data: { session } } = await supabaseClient.auth.getSession();
       const res = await fetch(`${EDGE_FUNCTIONS_URL}/admin-delete-user`, {
         method: 'POST',
