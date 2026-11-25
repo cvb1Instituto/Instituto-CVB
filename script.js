@@ -588,8 +588,13 @@ function renderTransparency(rows) {
     totalGasto += Number(pc.gasto);
     const saldo = Number(pc.arrecadado) - Number(pc.gasto);
     const temLink = TIPO_ANCORA[pc.tipo];
+    const { texto: relatoTexto, link: relatoLink } = separarLinkDoRelato(pc.relato);
     return `<tr>
-      <td>${escapeHtml(pc.projeto)}</td>
+      <td>
+        <strong>${escapeHtml(pc.projeto)}</strong>
+        ${relatoTexto ? `<div class="transparency-relato">${escapeHtml(relatoTexto)}</div>` : ''}
+        ${relatoLink ? `<a class="link-btn" href="${escapeHtml(relatoLink)}">Ver prestação de contas completa →</a>` : ''}
+      </td>
       <td><span class="event-badge badge-blue">${escapeHtml(TIPO_LABELS[pc.tipo] || pc.tipo)}</span></td>
       <td>${formatBRL(pc.arrecadado)}</td>
       <td>${formatBRL(pc.gasto)}</td>
@@ -730,16 +735,87 @@ function rifaMediaHtml(rifa) {
   return '';
 }
 
-function renderRifaSection(rifasAtivas) {
+// A rifa conta como sorteada quando já tem prestação de contas cadastrada
+// (Transparência, tipo "Rifa", ligada a ela) ou quando o dia do sorteio já passou.
+function rifaJaSorteada(rifa, prestacao) {
+  if (prestacao) return true;
+  if (!rifa.data_sorteio) return false;
+  const hoje = new Date();
+  const hojeStr = `${hoje.getFullYear()}-${String(hoje.getMonth() + 1).padStart(2, '0')}-${String(hoje.getDate()).padStart(2, '0')}`;
+  return rifa.data_sorteio < hojeStr;
+}
+
+// Separa o primeiro link do texto do relato (vira o botão "prestação completa").
+function separarLinkDoRelato(relato) {
+  const texto = relato || '';
+  const m = texto.match(/https?:\/\/\S+/);
+  if (!m) return { texto: texto.trim(), link: '' };
+  return { texto: texto.replace(m[0], '').trim(), link: m[0] };
+}
+
+function rifaSorteadaHtml(rifa, unica) {
+  const pc = rifa.prestacao;
+  const dataTxt = rifa.data_sorteio
+    ? new Date(rifa.data_sorteio + 'T00:00:00').toLocaleDateString('pt-BR', { day: '2-digit', month: 'long', year: 'numeric' })
+    : '';
+  if (!pc) {
+    return `
+      <div class="rifa-card${unica ? ' rifa-card--wide' : ''}">
+        ${rifaMediaHtml(rifa)}
+        <div class="rifa-card-body">
+          ${unica ? '' : `<h3>${escapeHtml(rifa.titulo)}</h3>`}
+          <span class="rifa-encerrada-badge">Sorteio realizado${dataTxt ? ` em ${dataTxt}` : ''}</span>
+          <p>As vendas estão encerradas. A prestação de contas será publicada aqui em breve.</p>
+        </div>
+      </div>
+    `;
+  }
+  const { texto, link } = separarLinkDoRelato(pc.relato);
+  return `
+    <div class="rifa-card${unica ? ' rifa-card--wide' : ''}">
+      ${rifaMediaHtml(rifa)}
+      <div class="rifa-card-body">
+        ${unica ? '' : `<h3>${escapeHtml(rifa.titulo)}</h3>`}
+        <span class="rifa-encerrada-badge">Sorteio realizado${dataTxt ? ` em ${dataTxt}` : ''}</span>
+        <h3 class="rifa-pc-titulo">Prestação de contas</h3>
+        ${texto ? `<p>${escapeHtml(texto)}</p>` : ''}
+        <div class="rifa-pc-numeros">
+          <div><span>Arrecadado</span><strong>${formatBRL(pc.arrecadado)}</strong></div>
+          <div><span>Destinado</span><strong>${formatBRL(pc.gasto)}</strong></div>
+          <div><span>Saldo</span><strong>${formatBRL(Number(pc.arrecadado) - Number(pc.gasto))}</strong></div>
+        </div>
+        ${link ? `<div class="hero-actions" style="margin-top:16px;"><a class="btn btn-primary" href="${escapeHtml(link)}">Ver prestação de contas completa</a></div>` : ''}
+      </div>
+    </div>
+  `;
+}
+
+function renderRifaSection(rifasAtivas, rifasSorteadas) {
   const section = document.getElementById('rifa');
   const content = document.getElementById('rifaContent');
   if (!content) return;
   RIFAS_ATIVAS = rifasAtivas || [];
-  if (RIFAS_ATIVAS.length === 0) {
+  const sorteadas = rifasSorteadas || [];
+  if (RIFAS_ATIVAS.length === 0 && sorteadas.length === 0) {
     if (section) section.style.display = 'none';
     return;
   }
   if (section) section.style.display = '';
+
+  // Sem rifa à venda: mostra só as já sorteadas, com a prestação de contas.
+  if (RIFAS_ATIVAS.length === 0) {
+    const unicaS = sorteadas.length === 1;
+    content.innerHTML = `
+      <div class="section-header reveal">
+        <span class="eyebrow">Rifa Solidária · Sorteio realizado</span>
+        <h2>${unicaS ? escapeHtml(sorteadas[0].titulo) : 'Rifas Sorteadas'}</h2>
+      </div>
+      <div class="rifas-grid${unicaS ? ' rifas-grid--single' : ''} reveal" id="rifasGrid">
+        ${sorteadas.map(r => rifaSorteadaHtml(r, unicaS)).join('')}
+      </div>
+    `;
+    return;
+  }
 
   // Quando só existe uma rifa, ela vira um card largo: imagem menor (sem corte) de
   // um lado e o texto do outro, pra caber tudo na tela sem cortar o cartaz.
@@ -752,6 +828,10 @@ function renderRifaSection(rifasAtivas) {
     </div>
     <div class="rifas-grid${unica ? ' rifas-grid--single' : ''} reveal" id="rifasGrid"></div>
     <div id="rifaExpandido"></div>
+    ${sorteadas.length ? `
+      <div class="section-header reveal" style="margin-top:48px;"><span class="eyebrow">Sorteio realizado</span><h2>Rifas Sorteadas</h2></div>
+      <div class="rifas-grid reveal">${sorteadas.map(r => rifaSorteadaHtml(r, false)).join('')}</div>
+    ` : ''}
   `;
 
   const grid = document.getElementById('rifasGrid');
@@ -1671,7 +1751,16 @@ async function loadContent() {
   renderMvv(mvvRows || []);
   renderProjetos(projetosRows || []);
   renderVoluntariado(blocks.voluntariado);
-  renderDoar(blocks.doar, (rifasRows || []).length > 0);
+  // Rifa já sorteada (tem prestação de contas ligada a ela ou a data do sorteio
+  // já passou) continua aparecendo no site, mas sem venda de números.
+  const prestacoesRifa = {};
+  (prestacaoRows || []).forEach(pc => { if (pc.tipo === 'rifa' && pc.item_id) prestacoesRifa[pc.item_id] = pc; });
+  const rifasAbertas = (rifasRows || []).filter(r => !rifaJaSorteada(r, prestacoesRifa[r.id]));
+  const rifasSorteadas = (rifasRows || [])
+    .filter(r => rifaJaSorteada(r, prestacoesRifa[r.id]))
+    .map(r => ({ ...r, prestacao: prestacoesRifa[r.id] || null }));
+
+  renderDoar(blocks.doar, rifasAbertas.length > 0);
   renderParceiros(parceirosRows || []);
   renderBlog(blogRows || []);
   renderContato(blocks.contato);
@@ -1682,7 +1771,7 @@ async function loadContent() {
   renderEvents();
   renderTransparency(prestacaoRows || []);
 
-  renderRifaSection(rifasRows || []);
+  renderRifaSection(rifasAbertas, rifasSorteadas);
 
   setupReveal();
 }

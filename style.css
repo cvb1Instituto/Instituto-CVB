@@ -810,3 +810,14 @@ button.partner-box:hover { box-shadow: var(--shadow-md); transform: translateY(-
   .viva-avatar-btn { width: 46px; height: 46px; }
   .viva-button-badge { width: 30px; height: 30px; }
 }
+
+/* ---- Rifa sorteada / prestação de contas (25/11/2026) ---- */
+.rifa-encerrada-badge { display: inline-block; align-self: flex-start; background: rgba(62,122,26,0.12); color: var(--green-dark); font-weight: 700; font-size: 13.5px; padding: 6px 14px; border-radius: 999px; margin-bottom: 14px; }
+.rifa-pc-titulo { font-size: 20px; margin: 4px 0 8px; }
+.rifa-pc-numeros { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-top: 6px; }
+.rifa-pc-numeros div { background: var(--light-bg); border-radius: var(--radius-sm); padding: 12px 14px; }
+.rifa-pc-numeros span { display: block; font-size: 12.5px; color: var(--gray); }
+.rifa-pc-numeros strong { display: block; font-size: 17px; color: var(--dark); white-space: nowrap; }
+.transparency-table td:first-child { min-width: 320px; }
+.transparency-relato { font-size: 13px; color: var(--gray); margin: 4px 0 6px; white-space: pre-line; max-width: 420px; }
+@media (max-width: 560px) { .rifa-pc-numeros { grid-template-columns: 1fr; } }
